@@ -1,10 +1,15 @@
+import 'package:alzhecare/fcm_service.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'sign_in_screen.dart';
 import 'caregiver_settings_screen.dart';
+import 'user_session_manager.dart';
+import 'geofencing_service.dart';
 
 class CaregiverProfileTab extends StatefulWidget {
   const CaregiverProfileTab({super.key});
+
   @override
   State<CaregiverProfileTab> createState() => _CaregiverProfileTabState();
 }
@@ -55,21 +60,18 @@ class _CaregiverProfileTabState extends State<CaregiverProfileTab> {
         return;
       }
 
-      // Récupérer le document du suiveur
       final suiveurDoc = await FirebaseFirestore.instance
           .collection('users')
           .doc(user.uid)
           .get();
 
-      // Récupérer l'UID du patient lié
       final patientUid = suiveurDoc.data()?['linkedPatient'] as String?;
 
       if (patientUid == null) {
-        // Pas de patient lié
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text("Aucun patient lié à ce compte"),
+              content: Text("Aucun patient lié"),
               backgroundColor: Colors.orange,
             ),
           );
@@ -80,7 +82,6 @@ class _CaregiverProfileTabState extends State<CaregiverProfileTab> {
 
       _patientUid = patientUid;
 
-      // Charger les données du patient lié
       final patDoc = await FirebaseFirestore.instance
           .collection('users')
           .doc(patientUid)
@@ -117,20 +118,13 @@ class _CaregiverProfileTabState extends State<CaregiverProfileTab> {
       });
     } catch (e) {
       debugPrint("Erreur: $e");
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text("Erreur de chargement: $e"),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
       setState(() => _isLoading = false);
     }
   }
 
   Future<void> _savePatientInfo() async {
     if (_patientUid == null) return;
+
     try {
       await FirebaseFirestore.instance
           .collection('users')
@@ -175,11 +169,11 @@ class _CaregiverProfileTabState extends State<CaregiverProfileTab> {
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setSheetState) => Padding(
-          padding: EdgeInsets.only(
-            bottom: MediaQuery.of(context).viewInsets.bottom,
-          ),
-          child: Container(
+        builder: (ctx, setSheetState) => DraggableScrollableSheet(
+          initialChildSize: 0.9,
+          minChildSize: 0.5,
+          maxChildSize: 0.95,
+          builder: (_, scrollController) => Container(
             decoration: const BoxDecoration(
               gradient: LinearGradient(
                 begin: Alignment.topCenter,
@@ -189,132 +183,131 @@ class _CaregiverProfileTabState extends State<CaregiverProfileTab> {
               borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
             ),
             padding: const EdgeInsets.fromLTRB(24, 16, 24, 32),
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Center(
-                    child: Container(
-                      width: 40,
-                      height: 4,
-                      decoration: BoxDecoration(
-                        color: Colors.black12,
-                        borderRadius: BorderRadius.circular(2),
-                      ),
+            child: ListView(
+              controller: scrollController,
+              children: [
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: Colors.black12,
+                      borderRadius: BorderRadius.circular(2),
                     ),
                   ),
-                  const SizedBox(height: 18),
-                  const Center(
-                    child: Text(
-                      'Modifier les informations',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
-                        color: Color(0xFF2E5AAC),
-                      ),
+                ),
+                const SizedBox(height: 18),
+                const Center(
+                  child: Text(
+                    'Modifier les informations',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFF2E5AAC),
                     ),
                   ),
-                  const SizedBox(height: 22),
+                ),
+                const SizedBox(height: 22),
 
-                  // Informations générales
-                  _field(_nameCtrl, 'Nom du patient', Icons.person_outline),
-                  const SizedBox(height: 14),
-                  _field(_ageCtrl, 'Âge', Icons.cake_outlined, type: TextInputType.number),
-                  const SizedBox(height: 14),
+                _field(_nameCtrl, 'Nom du patient', Icons.person_outline),
+                const SizedBox(height: 14),
+                _field(_ageCtrl, 'Age', Icons.cake_outlined,
+                    type: TextInputType.number),
+                const SizedBox(height: 14),
 
-                  DropdownButtonFormField<String>(
-                    value: _diseaseStage,
-                    items: _stages
-                        .map((s) => DropdownMenuItem(
-                      value: s,
-                      child: Text(s, style: const TextStyle(fontSize: 16)),
-                    ))
-                        .toList(),
-                    onChanged: (v) {
-                      if (v != null) setSheetState(() => _diseaseStage = v);
+                DropdownButtonFormField<String>(
+                  value: _diseaseStage,
+                  items: _stages
+                      .map((s) => DropdownMenuItem(
+                    value: s,
+                    child: Text(s, style: const TextStyle(fontSize: 16)),
+                  ))
+                      .toList(),
+                  onChanged: (v) {
+                    if (v != null) setSheetState(() => _diseaseStage = v);
+                  },
+                  decoration: InputDecoration(
+                    labelText: 'Stade de la maladie',
+                    labelStyle: const TextStyle(fontSize: 16),
+                    prefixIcon: const Icon(
+                      Icons.medical_information_outlined,
+                      color: Color(0xFF4A90E2),
+                    ),
+                    filled: true,
+                    fillColor: Colors.white,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(14),
+                      borderSide: BorderSide.none,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 14),
+
+                _field(_doctorCtrl, 'Medecin referent',
+                    Icons.medical_services_outlined),
+                const SizedBox(height: 14),
+                _field(_treatmentCtrl, 'Traitement', Icons.medication_outlined),
+                const SizedBox(height: 14),
+                _field(_allergiesCtrl, 'Allergies', Icons.warning_amber_outlined),
+                const SizedBox(height: 14),
+                _field(_diabetesCtrl, 'Diabete', Icons.bloodtype_outlined),
+                const SizedBox(height: 14),
+                _field(_bloodPressureCtrl, 'Tension arterielle',
+                    Icons.favorite_outline),
+                const SizedBox(height: 14),
+                _field(_otherConditionsCtrl, 'Autres conditions',
+                    Icons.health_and_safety_outlined),
+                const SizedBox(height: 14),
+                _field(_homeAddressCtrl, 'Adresse du domicile',
+                    Icons.home_outlined),
+                const SizedBox(height: 24),
+
+                SizedBox(
+                  width: double.infinity,
+                  height: 54,
+                  child: ElevatedButton(
+                    onPressed: () {
+                      Navigator.pop(context);
+                      _savePatientInfo();
                     },
-                    decoration: InputDecoration(
-                      labelText: 'Stade de la maladie',
-                      labelStyle: const TextStyle(fontSize: 16),
-                      prefixIcon: const Icon(
-                        Icons.medical_information_outlined,
-                        color: Color(0xFF4A90E2),
+                    style: ElevatedButton.styleFrom(
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(30),
                       ),
-                      filled: true,
-                      fillColor: Colors.white,
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(14),
-                        borderSide: BorderSide.none,
-                      ),
+                      padding: EdgeInsets.zero,
+                      backgroundColor: Colors.transparent,
+                      elevation: 0,
                     ),
-                  ),
-                  const SizedBox(height: 14),
-
-                  _field(_doctorCtrl, 'Médecin référent', Icons.medical_services_outlined),
-                  const SizedBox(height: 14),
-                  _field(_treatmentCtrl, 'Traitement', Icons.medication_outlined),
-                  const SizedBox(height: 14),
-                  _field(_allergiesCtrl, 'Allergies', Icons.warning_amber_outlined),
-                  const SizedBox(height: 14),
-
-                  // Nouvelles conditions médicales
-                  _field(_diabetesCtrl, 'Diabète', Icons.bloodtype_outlined),
-                  const SizedBox(height: 14),
-                  _field(_bloodPressureCtrl, 'Tension artérielle', Icons.favorite_outline),
-                  const SizedBox(height: 14),
-                  _field(_otherConditionsCtrl, 'Autres conditions', Icons.health_and_safety_outlined),
-                  const SizedBox(height: 14),
-
-                  _field(_homeAddressCtrl, 'Adresse du domicile', Icons.home_outlined),
-                  const SizedBox(height: 24),
-
-                  SizedBox(
-                    width: double.infinity,
-                    height: 54,
-                    child: ElevatedButton(
-                      onPressed: () {
-                        Navigator.pop(context);
-                        _savePatientInfo();
-                      },
-                      style: ElevatedButton.styleFrom(
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(30),
+                    child: Ink(
+                      decoration: const BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: [Color(0xFF6EC6FF), Color(0xFF4A90E2)],
                         ),
-                        padding: EdgeInsets.zero,
-                        backgroundColor: Colors.transparent,
-                        elevation: 0,
+                        borderRadius: BorderRadius.all(Radius.circular(30)),
                       ),
-                      child: Ink(
-                        decoration: const BoxDecoration(
-                          gradient: LinearGradient(
-                            colors: [Color(0xFF6EC6FF), Color(0xFF4A90E2)],
-                          ),
-                          borderRadius: BorderRadius.all(Radius.circular(30)),
-                        ),
-                        child: const Center(
-                          child: Text(
-                            'Enregistrer',
-                            style: TextStyle(
-                              fontSize: 17,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.white,
-                            ),
+                      child: const Center(
+                        child: Text(
+                          'Enregistrer',
+                          style: TextStyle(
+                            fontSize: 17,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white,
                           ),
                         ),
                       ),
                     ),
                   ),
-                ],
-              ),
+                ),
+
+                SizedBox(height: MediaQuery.of(context).viewInsets.bottom),
+              ],
             ),
           ),
         ),
       ),
     );
   }
-
   Widget _field(
       TextEditingController ctrl,
       String hint,
@@ -336,6 +329,67 @@ class _CaregiverProfileTabState extends State<CaregiverProfileTab> {
           borderRadius: BorderRadius.circular(14),
           borderSide: BorderSide.none,
         ),
+      ),
+    );
+  }
+
+  Future<void> _logout() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text("Déconnexion"),
+        content: const Text("Voulez-vous vraiment vous déconnecter ?"),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text("Annuler"),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF2E5AAC),
+            ),
+            child: const Text("Déconnexion", style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
+    try {
+      await FCMService.stopListeningFirestoreAlerts();
+      await GeofencingService.stopTracking();
+      await UserSessionManager.clearSession();
+      await FirebaseAuth.instance.signOut();
+
+      if (mounted) {
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(builder: (_) => const SignInScreen()),
+              (route) => false,
+        );
+      }
+    } catch (e) {
+      print("[Logout] Erreur: $e");
+    }
+  }
+
+  void _showRemindersManagement() {
+    if (_patientUid == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Aucun patient lié"),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => _RemindersManagementScreen(patientUid: _patientUid!),
       ),
     );
   }
@@ -372,7 +426,6 @@ class _CaregiverProfileTabState extends State<CaregiverProfileTab> {
           padding: const EdgeInsets.all(20),
           child: Column(
             children: [
-              // AVATAR
               Container(
                 width: 90,
                 height: 90,
@@ -404,7 +457,6 @@ class _CaregiverProfileTabState extends State<CaregiverProfileTab> {
 
               const SizedBox(height: 30),
 
-              // INFOS PATIENT
               _card(
                 'Informations du patient',
                 action: _buildGradientButton('Modifier', _showEditDialog),
@@ -450,70 +502,111 @@ class _CaregiverProfileTabState extends State<CaregiverProfileTab> {
 
               const SizedBox(height: 20),
 
-              // PARAMÈTRES
               _card(
                 'Paramètres',
-                child: InkWell(
-                  onTap: () => Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (_) => const CaregiverSettingsScreen()),
-                  ),
-                  borderRadius: BorderRadius.circular(12),
-                  child: Padding(
-                    padding: const EdgeInsets.all(12),
-                    child: Row(
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            gradient: const LinearGradient(
-                              colors: [Color(0xFF6EC6FF), Color(0xFF4A90E2)],
-                            ),
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: const Icon(Icons.settings, color: Colors.white, size: 24),
-                        ),
-                        const SizedBox(width: 14),
-                        const Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'Configurer la zone de sécurité',
-                                style: TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w600,
-                                  color: Color(0xFF2E5AAC),
+                child: Column(
+                  children: [
+                    InkWell(
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => const CaregiverSettingsScreen()),
+                      ),
+                      borderRadius: BorderRadius.circular(12),
+                      child: Padding(
+                        padding: const EdgeInsets.all(12),
+                        child: Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                gradient: const LinearGradient(
+                                  colors: [Color(0xFF6EC6FF), Color(0xFF4A90E2)],
                                 ),
+                                borderRadius: BorderRadius.circular(12),
                               ),
-                              SizedBox(height: 4),
-                              Text(
-                                'Domicile, rayon de zone, notifications',
-                                style: TextStyle(fontSize: 14, color: Colors.black54),
+                              child: const Icon(Icons.settings, color: Colors.white, size: 24),
+                            ),
+                            const SizedBox(width: 14),
+                            const Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Zone de sécurité',
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w600,
+                                      color: Color(0xFF2E5AAC),
+                                    ),
+                                  ),
+                                  SizedBox(height: 4),
+                                  Text(
+                                    'Domicile, rayon, notifications',
+                                    style: TextStyle(fontSize: 14, color: Colors.black54),
+                                  ),
+                                ],
                               ),
-                            ],
-                          ),
+                            ),
+                            const Icon(Icons.arrow_forward_ios, color: Colors.black26, size: 18),
+                          ],
                         ),
-                        const Icon(Icons.arrow_forward_ios, color: Colors.black26, size: 18),
-                      ],
+                      ),
                     ),
-                  ),
+                    const Divider(height: 24),
+                    InkWell(
+                      onTap: _showRemindersManagement,
+                      borderRadius: BorderRadius.circular(12),
+                      child: Padding(
+                        padding: const EdgeInsets.all(12),
+                        child: Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                gradient: const LinearGradient(
+                                  colors: [Color(0xFFFFB74D), Color(0xFFFF9800)],
+                                ),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: const Icon(Icons.notifications, color: Colors.white, size: 24),
+                            ),
+                            const SizedBox(width: 14),
+                            const Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Gérer les rappels',
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w600,
+                                      color: Color(0xFF2E5AAC),
+                                    ),
+                                  ),
+                                  SizedBox(height: 4),
+                                  Text(
+                                    'Ajouter, modifier, supprimer',
+                                    style: TextStyle(fontSize: 14, color: Colors.black54),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const Icon(Icons.arrow_forward_ios, color: Colors.black26, size: 18),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
 
               const SizedBox(height: 20),
 
-              // DÉCONNEXION
               SizedBox(
                 width: double.infinity,
                 height: 54,
                 child: OutlinedButton.icon(
-                  onPressed: () async {
-                    await FirebaseAuth.instance.signOut();
-                    if (mounted) {
-                      Navigator.of(context).popUntil((r) => r.isFirst);
-                    }
-                  },
+                  onPressed: _logout,
                   style: OutlinedButton.styleFrom(
                     foregroundColor: const Color(0xFFFF5F6D),
                     side: const BorderSide(color: Color(0xFFFF5F6D), width: 2),
@@ -621,4 +714,460 @@ class _CaregiverProfileTabState extends State<CaregiverProfileTab> {
       ),
     ),
   );
+}
+
+// ==================== ÉCRAN DE GESTION DES RAPPELS ====================
+
+class _RemindersManagementScreen extends StatefulWidget {
+  final String patientUid;
+
+  const _RemindersManagementScreen({required this.patientUid});
+
+  @override
+  State<_RemindersManagementScreen> createState() => _RemindersManagementScreenState();
+}
+
+class _RemindersManagementScreenState extends State<_RemindersManagementScreen> {
+  List<Map<String, dynamic>> _reminders = [];
+  bool _isLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadReminders();
+  }
+
+  Future<void> _loadReminders() async {
+    setState(() => _isLoading = true);
+
+    try {
+      final now = DateTime.now();
+      final snapshot = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(widget.patientUid)
+          .collection('reminders')
+          .where('done', isEqualTo: false)
+          .where('date', isGreaterThanOrEqualTo: Timestamp.fromDate(now))
+          .orderBy('date')
+          .get();
+
+      final list = snapshot.docs.map((doc) {
+        final data = doc.data();
+        return {
+          'id': doc.id,
+          'title': data['title'] ?? '',
+          'date': data['date'] as Timestamp?,
+          'done': data['done'] ?? false,
+        };
+      }).toList();
+
+      setState(() {
+        _reminders = list;
+        _isLoading = false;
+      });
+    } catch (e) {
+      debugPrint("Erreur: $e");
+      setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _deleteReminder(String docId) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text("Supprimer ce rappel ?"),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text("Non"),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text("Oui", style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
+    try {
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(widget.patientUid)
+          .collection('reminders')
+          .doc(docId)
+          .delete();
+
+      _loadReminders();
+    } catch (e) {
+      debugPrint("Erreur: $e");
+    }
+  }
+
+  void _showAddDialog() {
+    final titleController = TextEditingController();
+    TimeOfDay selectedTime = TimeOfDay.now();
+    DateTime selectedDate = DateTime.now();
+
+    showDialog(
+      context: context,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              backgroundColor: const Color(0xFFF0F7FF),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+              title: const Text(
+                'Nouveau rappel',
+                style: TextStyle(
+                  color: Color(0xFF2E5AAC),
+                  fontSize: 22,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: titleController,
+                    autofocus: true,
+                    style: const TextStyle(fontSize: 18),
+                    decoration: InputDecoration(
+                      labelText: 'Quoi ?',
+                      labelStyle: const TextStyle(fontSize: 16),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      filled: true,
+                      fillColor: Colors.white,
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+
+                  Row(
+                    children: [
+                      Expanded(
+                        child: GestureDetector(
+                          onTap: () async {
+                            final date = await showDatePicker(
+                              context: context,
+                              initialDate: selectedDate,
+                              firstDate: DateTime.now(),
+                              lastDate: DateTime.now().add(const Duration(days: 365)),
+                            );
+                            if (date != null) {
+                              setDialogState(() => selectedDate = date);
+                            }
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.all(16),
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: const Color(0xFF4A90E2), width: 2),
+                            ),
+                            child: Column(
+                              children: [
+                                const Icon(Icons.calendar_today, color: Color(0xFF4A90E2), size: 28),
+                                const SizedBox(height: 8),
+                                Text(
+                                  "${selectedDate.day}/${selectedDate.month}",
+                                  style: const TextStyle(
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.bold,
+                                    color: Color(0xFF2E5AAC),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+
+                      Expanded(
+                        child: GestureDetector(
+                          onTap: () async {
+                            final time = await showTimePicker(
+                              context: context,
+                              initialTime: selectedTime,
+                            );
+                            if (time != null) {
+                              setDialogState(() => selectedTime = time);
+                            }
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.all(16),
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: const Color(0xFF4A90E2), width: 2),
+                            ),
+                            child: Column(
+                              children: [
+                                const Icon(Icons.access_time, color: Color(0xFF4A90E2), size: 28),
+                                const SizedBox(height: 8),
+                                Text(
+                                  selectedTime.format(context),
+                                  style: const TextStyle(
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.bold,
+                                    color: Color(0xFF2E5AAC),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(dialogContext),
+                  child: const Text("Annuler", style: TextStyle(fontSize: 16)),
+                ),
+                ElevatedButton(
+                  onPressed: () async {
+                    final title = titleController.text.trim();
+                    if (title.isEmpty) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text("Entrez un titre")),
+                      );
+                      return;
+                    }
+
+                    final reminderDateTime = DateTime(
+                      selectedDate.year,
+                      selectedDate.month,
+                      selectedDate.day,
+                      selectedTime.hour,
+                      selectedTime.minute,
+                    );
+
+                    await FirebaseFirestore.instance
+                        .collection('users')
+                        .doc(widget.patientUid)
+                        .collection('reminders')
+                        .add({
+                      'title': title,
+                      'date': Timestamp.fromDate(reminderDateTime),
+                      'done': false,
+                      'createdAt': FieldValue.serverTimestamp(),
+                    });
+
+                    Navigator.pop(dialogContext);
+                    _loadReminders();
+
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text("Rappel ajouté"),
+                          backgroundColor: Colors.green,
+                        ),
+                      );
+                    }
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF4A90E2),
+                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  child: const Text(
+                    "Ajouter",
+                    style: TextStyle(fontSize: 16, color: Colors.white),
+                  ),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  String _formatTime(Timestamp? ts) {
+    if (ts == null) return '--:--';
+    final d = ts.toDate();
+    return "${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}";
+  }
+
+  String _formatDate(Timestamp? ts) {
+    if (ts == null) return '';
+    final d = ts.toDate();
+    return "${d.day}/${d.month}/${d.year}";
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFFF8FAFC),
+      appBar: AppBar(
+        backgroundColor: const Color(0xFFEAF2FF),
+        elevation: 0,
+        title: const Text(
+          "Rappels du patient",
+          style: TextStyle(
+            color: Color(0xFF2E5AAC),
+            fontWeight: FontWeight.bold,
+            fontSize: 22,
+          ),
+        ),
+        centerTitle: true,
+      ),
+      floatingActionButton: Container(
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(
+            colors: [Color(0xFF6EC6FF), Color(0xFF4A90E2)],
+          ),
+          borderRadius: BorderRadius.circular(30),
+        ),
+        child: FloatingActionButton.extended(
+          onPressed: _showAddDialog,
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          icon: const Icon(Icons.add, color: Colors.white, size: 28),
+          label: const Text(
+            "Ajouter",
+            style: TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.bold,
+              fontSize: 18,
+            ),
+          ),
+        ),
+      ),
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [Color(0xFFEAF2FF), Color(0xFFF6FBFF)],
+          ),
+        ),
+        child: _isLoading
+            ? const Center(child: CircularProgressIndicator(color: Color(0xFF4A90E2)))
+            : _reminders.isEmpty
+            ? _buildEmptyState()
+            : RefreshIndicator(
+          onRefresh: _loadReminders,
+          child: ListView(
+            padding: const EdgeInsets.all(20),
+            children: _reminders.map((r) => _buildReminderCard(r)).toList(),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildReminderCard(Map<String, dynamic> reminder) {
+    final title = reminder['title'] as String;
+    final ts = reminder['date'] as Timestamp?;
+    final docId = reminder['id'] as String;
+    final timeText = _formatTime(ts);
+    final dateText = _formatDate(ts);
+
+    return Card(
+      elevation: 2,
+      margin: const EdgeInsets.symmetric(vertical: 10),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Row(
+          children: [
+            Container(
+              width: 56,
+              height: 56,
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  colors: [Color(0xFF6EC6FF), Color(0xFF4A90E2)],
+                ),
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: const Icon(Icons.notifications, color: Colors.white, size: 28),
+            ),
+            const SizedBox(width: 16),
+
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFF1F2937),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Icon(Icons.calendar_today, size: 16, color: Colors.grey[600]),
+                      const SizedBox(width: 6),
+                      Text(
+                        dateText,
+                        style: TextStyle(fontSize: 16, color: Colors.grey[700]),
+                      ),
+                      const SizedBox(width: 12),
+                      Icon(Icons.access_time, size: 16, color: Colors.grey[600]),
+                      const SizedBox(width: 6),
+                      Text(
+                        timeText,
+                        style: TextStyle(fontSize: 16, color: Colors.grey[700]),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+
+            InkWell(
+              onTap: () => _deleteReminder(docId),
+              child: const Icon(
+                Icons.delete_outline,
+                color: Colors.redAccent,
+                size: 30,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildEmptyState() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.notifications_none_rounded, size: 100, color: Colors.grey[300]),
+          const SizedBox(height: 30),
+          const Text(
+            "Aucun rappel",
+            style: TextStyle(
+              fontSize: 26,
+              fontWeight: FontWeight.bold,
+              color: Color(0xFF2E5AAC),
+            ),
+          ),
+          const SizedBox(height: 16),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 40),
+            child: Text(
+              "Appuyez sur + pour ajouter",
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 18, color: Colors.grey[700]),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }

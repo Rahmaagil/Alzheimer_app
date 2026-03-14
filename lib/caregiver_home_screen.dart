@@ -1,16 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'background_service.dart';
 import 'caregiver_alerts_screen.dart';
 import 'caregiver_dashboard_tab.dart';
 import 'caregiver_map_tab.dart';
 import 'caregiver_profile_tab.dart';
 import 'caregiver_chatbot_screen.dart';
 import 'fcm_service.dart';
-import 'notification_listener_service.dart';
 
 class CaregiverHomeScreen extends StatefulWidget {
   const CaregiverHomeScreen({super.key});
+
   @override
   State<CaregiverHomeScreen> createState() => _CaregiverHomeScreenState();
 }
@@ -29,13 +30,8 @@ class _CaregiverHomeScreenState extends State<CaregiverHomeScreen> {
   Future<void> _initializeFCM() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user != null) {
-      // Sauvegarder token FCM
-      await FCMService.saveTokenForUser(user.uid);
-
-      // AJOUTER : Démarrer l'écoute des notifications
-      await NotificationListenerService.startListening(user.uid);
-
-      print("[CaregiverHome] Token FCM et listener demarres");
+      FCMService.startListeningFirestoreAlerts(user.uid);
+      print("[CaregiverHome] FCM listener demarre");
     }
   }
 
@@ -77,8 +73,8 @@ class _CaregiverHomeScreenState extends State<CaregiverHomeScreen> {
 
   @override
   void dispose() {
-    // AJOUTER : Arrêter l'écoute
-    NotificationListenerService.stopListening();
+    FCMService.stopListeningFirestoreAlerts();
+    BackgroundService.stopListening();
     super.dispose();
   }
 
@@ -87,7 +83,6 @@ class _CaregiverHomeScreenState extends State<CaregiverHomeScreen> {
     return Scaffold(
       body: IndexedStack(index: _currentIndex, children: _tabs),
 
-      // BOUTON FLOTTANT CHATBOT
       floatingActionButton: Container(
         width: 64,
         height: 64,
@@ -96,11 +91,11 @@ class _CaregiverHomeScreenState extends State<CaregiverHomeScreen> {
           gradient: const LinearGradient(
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
-            colors: [Color(0xFF6EC6FF), Color(0xFF4A90E2)],
+            colors: [Color(0xFF6EC6FF), Color(0xFF2EC7F0)],
           ),
           boxShadow: [
             BoxShadow(
-              color: const Color(0xFF4A90E2).withOpacity(0.4),
+              color: const Color(0xFF4A90E2).withValues(alpha: 0.4),
               blurRadius: 20,
               offset: const Offset(0, 8),
             ),
@@ -130,7 +125,7 @@ class _CaregiverHomeScreenState extends State<CaregiverHomeScreen> {
         decoration: BoxDecoration(
           color: Colors.white,
           boxShadow: [BoxShadow(
-              color: Colors.black.withOpacity(0.08),
+              color: Colors.black.withValues(alpha: 0.08),
               blurRadius: 20, offset: const Offset(0, -3))],
         ),
         child: SafeArea(

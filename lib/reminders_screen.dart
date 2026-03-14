@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'reminder_notification_service.dart';
 
 class RemindersScreen extends StatefulWidget {
   const RemindersScreen({super.key});
@@ -30,7 +31,7 @@ class _RemindersScreenState extends State<RemindersScreen> {
           .collection('users')
           .doc(user.uid)
           .collection('reminders')
-          .orderBy('date')
+          .orderBy('date', descending: false)
           .get();
 
       final list = snapshot.docs.map((doc) {
@@ -38,11 +39,10 @@ class _RemindersScreenState extends State<RemindersScreen> {
         return {
           'id': doc.id,
           'title': data['title'] ?? '',
-          'type': data['type'] ?? 'event',
           'date': data['date'] as Timestamp?,
           'done': data['done'] ?? false,
         };
-      }).toList();
+      }).where((reminder) => !(reminder['done'] as bool)).toList();
 
       setState(() {
         _reminders = list;
@@ -66,7 +66,33 @@ class _RemindersScreenState extends State<RemindersScreen> {
           .doc(docId)
           .update({'done': !currentDone});
 
+      // Annuler la notification
+      await ReminderNotificationService.cancelReminder(docId);
+
       _loadReminders();
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                Icon(
+                  !currentDone ? Icons.check_circle : Icons.refresh,
+                  color: Colors.white,
+                ),
+                const SizedBox(width: 12),
+                Text(!currentDone ? "Fait" : "A faire"),
+              ],
+            ),
+            backgroundColor:
+            !currentDone ? const Color(0xFF66BB6A) : const Color(0xFF4A90E2),
+            behavior: SnackBarBehavior.floating,
+            shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            duration: const Duration(seconds: 1),
+          ),
+        );
+      }
     } catch (e) {
       debugPrint("Erreur: $e");
     }
@@ -77,15 +103,27 @@ class _RemindersScreenState extends State<RemindersScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text("Supprimer ?"),
+        title: const Text("Supprimer ce rappel ?"),
+        content: const Text("Cette action est irreversible."),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text("Non"),
+            child: const Text("Annuler"),
           ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text("Oui", style: TextStyle(color: Colors.red)),
+          Container(
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                colors: [Color(0xFFFF5F6D), Color(0xFFFFC371)],
+              ),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text(
+                "Supprimer",
+                style: TextStyle(color: Colors.white),
+              ),
+            ),
           ),
         ],
       ),
@@ -104,119 +142,46 @@ class _RemindersScreenState extends State<RemindersScreen> {
           .doc(docId)
           .delete();
 
+      // Annuler la notification
+      await ReminderNotificationService.cancelReminder(docId);
+
       _loadReminders();
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Row(
+              children: [
+                Icon(Icons.check_circle, color: Colors.white),
+                SizedBox(width: 12),
+                Text("Rappel supprime"),
+              ],
+            ),
+            backgroundColor: const Color(0xFF66BB6A),
+            behavior: SnackBarBehavior.floating,
+            shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          ),
+        );
+      }
     } catch (e) {
       debugPrint("Erreur: $e");
     }
   }
 
-  void _showTypeSelectionDialog() {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) => Container(
-        padding: const EdgeInsets.all(20),
-        decoration: const BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 40,
-              height: 4,
-              decoration: BoxDecoration(
-                color: Colors.grey[300],
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
-            const SizedBox(height: 30),
-
-            // Type 1: Médicament
-            _buildTypeButton(
-              icon: Icons.medication,
-              color: const Color(0xFFFF6B6B),
-              title: "Médicament",
-              onTap: () {
-                Navigator.pop(ctx);
-                _showAddDialog('medication');
-              },
-            ),
-            const SizedBox(height: 16),
-
-            // Type 2: Rendez-vous
-            _buildTypeButton(
-              icon: Icons.calendar_today,
-              color: const Color(0xFF10B981),
-              title: "Rendez-vous",
-              onTap: () {
-                Navigator.pop(ctx);
-                _showAddDialog('appointment');
-              },
-            ),
-            const SizedBox(height: 16),
-
-            // Type 3: Événement
-            _buildTypeButton(
-              icon: Icons.event,
-              color: const Color(0xFFFFB74D),
-              title: "Événement",
-              onTap: () {
-                Navigator.pop(ctx);
-                _showAddDialog('event');
-              },
-            ),
-            const SizedBox(height: 20),
-          ],
-        ),
-      ),
-    );
+  String _formatTime(Timestamp? ts) {
+    if (ts == null) return '--:--';
+    final d = ts.toDate();
+    return "${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}";
   }
 
-  Widget _buildTypeButton({
-    required IconData icon,
-    required Color color,
-    required String title,
-    required VoidCallback onTap,
-  }) {
-    return InkWell(
-      onTap: onTap,
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.all(20),
-        decoration: BoxDecoration(
-          color: color.withOpacity(0.1),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: color, width: 2),
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 60,
-              height: 60,
-              decoration: BoxDecoration(
-                color: color,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Icon(icon, color: Colors.white, size: 32),
-            ),
-            const SizedBox(width: 20),
-            Text(
-              title,
-              style: TextStyle(
-                fontSize: 22,
-                fontWeight: FontWeight.bold,
-                color: color,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
+  String _formatDate(Timestamp? ts) {
+    if (ts == null) return '';
+    final d = ts.toDate();
+    return "${d.day}/${d.month}/${d.year}";
   }
 
-  void _showAddDialog(String type) {
+  void _showAddDialog() {
     final titleController = TextEditingController();
     TimeOfDay selectedTime = TimeOfDay.now();
     DateTime selectedDate = DateTime.now();
@@ -226,26 +191,13 @@ class _RemindersScreenState extends State<RemindersScreen> {
       builder: (dialogContext) {
         return StatefulBuilder(
           builder: (context, setDialogState) {
-            String dialogTitle = '';
-            String fieldLabel = '';
-
-            if (type == 'medication') {
-              dialogTitle = 'Nouveau médicament';
-              fieldLabel = 'Nom du médicament';
-            } else if (type == 'appointment') {
-              dialogTitle = 'Nouveau rendez-vous';
-              fieldLabel = 'Avec qui ?';
-            } else {
-              dialogTitle = 'Nouvel événement';
-              fieldLabel = 'Quel événement ?';
-            }
-
             return AlertDialog(
               backgroundColor: const Color(0xFFF0F7FF),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-              title: Text(
-                dialogTitle,
-                style: const TextStyle(
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(24)),
+              title: const Text(
+                'Nouveau rappel',
+                style: TextStyle(
                   color: Color(0xFF2E5AAC),
                   fontSize: 22,
                   fontWeight: FontWeight.bold,
@@ -259,7 +211,7 @@ class _RemindersScreenState extends State<RemindersScreen> {
                     autofocus: true,
                     style: const TextStyle(fontSize: 18),
                     decoration: InputDecoration(
-                      labelText: fieldLabel,
+                      labelText: 'Quoi ?',
                       labelStyle: const TextStyle(fontSize: 16),
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12),
@@ -270,10 +222,8 @@ class _RemindersScreenState extends State<RemindersScreen> {
                   ),
                   const SizedBox(height: 24),
 
-                  // Date et heure
                   Row(
                     children: [
-                      // Date
                       Expanded(
                         child: GestureDetector(
                           onTap: () async {
@@ -281,7 +231,8 @@ class _RemindersScreenState extends State<RemindersScreen> {
                               context: context,
                               initialDate: selectedDate,
                               firstDate: DateTime.now(),
-                              lastDate: DateTime.now().add(const Duration(days: 365)),
+                              lastDate: DateTime.now()
+                                  .add(const Duration(days: 365)),
                             );
                             if (date != null) {
                               setDialogState(() => selectedDate = date);
@@ -292,11 +243,13 @@ class _RemindersScreenState extends State<RemindersScreen> {
                             decoration: BoxDecoration(
                               color: Colors.white,
                               borderRadius: BorderRadius.circular(12),
-                              border: Border.all(color: const Color(0xFF4A90E2), width: 2),
+                              border: Border.all(
+                                  color: const Color(0xFF4A90E2), width: 2),
                             ),
                             child: Column(
                               children: [
-                                const Icon(Icons.calendar_today, color: Color(0xFF4A90E2), size: 28),
+                                const Icon(Icons.calendar_today,
+                                    color: Color(0xFF4A90E2), size: 28),
                                 const SizedBox(height: 8),
                                 Text(
                                   "${selectedDate.day}/${selectedDate.month}",
@@ -313,7 +266,6 @@ class _RemindersScreenState extends State<RemindersScreen> {
                       ),
                       const SizedBox(width: 12),
 
-                      // Heure
                       Expanded(
                         child: GestureDetector(
                           onTap: () async {
@@ -330,11 +282,13 @@ class _RemindersScreenState extends State<RemindersScreen> {
                             decoration: BoxDecoration(
                               color: Colors.white,
                               borderRadius: BorderRadius.circular(12),
-                              border: Border.all(color: const Color(0xFF4A90E2), width: 2),
+                              border: Border.all(
+                                  color: const Color(0xFF4A90E2), width: 2),
                             ),
                             child: Column(
                               children: [
-                                const Icon(Icons.access_time, color: Color(0xFF4A90E2), size: 28),
+                                const Icon(Icons.access_time,
+                                    color: Color(0xFF4A90E2), size: 28),
                                 const SizedBox(height: 8),
                                 Text(
                                   selectedTime.format(context),
@@ -358,61 +312,101 @@ class _RemindersScreenState extends State<RemindersScreen> {
                   onPressed: () => Navigator.pop(dialogContext),
                   child: const Text("Annuler", style: TextStyle(fontSize: 16)),
                 ),
-                ElevatedButton(
-                  onPressed: () async {
-                    final title = titleController.text.trim();
-                    if (title.isEmpty) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text("Entrez un titre")),
-                      );
-                      return;
-                    }
-
-                    final user = FirebaseAuth.instance.currentUser;
-                    if (user == null) return;
-
-                    final reminderDateTime = DateTime(
-                      selectedDate.year,
-                      selectedDate.month,
-                      selectedDate.day,
-                      selectedTime.hour,
-                      selectedTime.minute,
-                    );
-
-                    await FirebaseFirestore.instance
-                        .collection('users')
-                        .doc(user.uid)
-                        .collection('reminders')
-                        .add({
-                      'title': title,
-                      'type': type,
-                      'date': Timestamp.fromDate(reminderDateTime),
-                      'done': false,
-                      'createdAt': FieldValue.serverTimestamp(),
-                    });
-
-                    Navigator.pop(dialogContext);
-                    _loadReminders();
-
-                    if (mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text("Ajouté"),
-                          backgroundColor: Colors.green,
-                        ),
-                      );
-                    }
-                  },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF4A90E2),
-                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
+                Container(
+                  decoration: BoxDecoration(
+                    gradient: const LinearGradient(
+                      colors: [Color(0xFF6EC6FF), Color(0xFF4A90E2)],
                     ),
+                    borderRadius: BorderRadius.circular(8),
                   ),
-                  child: const Text(
-                    "Ajouter",
-                    style: TextStyle(fontSize: 16, color: Colors.white),
+                  child: TextButton(
+                    onPressed: () async {
+                      final title = titleController.text.trim();
+                      if (title.isEmpty) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text("Entrez un titre")),
+                        );
+                        return;
+                      }
+
+                      final user = FirebaseAuth.instance.currentUser;
+                      if (user == null) return;
+
+                      final reminderDateTime = DateTime(
+                        selectedDate.year,
+                        selectedDate.month,
+                        selectedDate.day,
+                        selectedTime.hour,
+                        selectedTime.minute,
+                      );
+
+                      try {
+                        // Ajouter dans Firestore
+                        final docRef = await FirebaseFirestore.instance
+                            .collection('users')
+                            .doc(user.uid)
+                            .collection('reminders')
+                            .add({
+                          'title': title,
+                          'date': Timestamp.fromDate(reminderDateTime),
+                          'done': false,
+                          'createdAt': FieldValue.serverTimestamp(),
+                        });
+
+                        // Programmer la notification
+                        await ReminderNotificationService.scheduleReminder(
+                          reminderId: docRef.id,
+                          title: title,
+                          scheduledTime: reminderDateTime,
+                        );
+
+                        Navigator.pop(dialogContext);
+
+                        await Future.delayed(const Duration(milliseconds: 300));
+                        _loadReminders();
+
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: const Row(
+                                children: [
+                                  Icon(Icons.check_circle, color: Colors.white),
+                                  SizedBox(width: 12),
+                                  Text("Rappel ajoute"),
+                                ],
+                              ),
+                              backgroundColor: const Color(0xFF66BB6A),
+                              behavior: SnackBarBehavior.floating,
+                              shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12)),
+                            ),
+                          );
+                        }
+                      } catch (e) {
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Row(
+                                children: [
+                                  const Icon(Icons.error_outline,
+                                      color: Colors.white),
+                                  const SizedBox(width: 12),
+                                  Text("Erreur: $e"),
+                                ],
+                              ),
+                              backgroundColor: const Color(0xFFFF5F6D),
+                              behavior: SnackBarBehavior.floating,
+                              shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12)),
+                            ),
+                          );
+                        }
+                      }
+                    },
+                    child: const Text(
+                      "Ajouter",
+                      style: TextStyle(fontSize: 16, color: Colors.white),
+                    ),
                   ),
                 ),
               ],
@@ -423,58 +417,48 @@ class _RemindersScreenState extends State<RemindersScreen> {
     );
   }
 
-  String _formatTime(Timestamp? ts) {
-    if (ts == null) return '--:--';
-    final d = ts.toDate();
-    return "${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}";
-  }
-
-  String _formatDate(Timestamp? ts) {
-    if (ts == null) return '';
-    final d = ts.toDate();
-    return "${d.day}/${d.month}/${d.year}";
-  }
-
   @override
   Widget build(BuildContext context) {
-    final pending = _reminders.where((r) => !(r['done'] as bool)).toList();
-    final done = _reminders.where((r) => r['done'] as bool).toList();
-
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
       appBar: AppBar(
         backgroundColor: const Color(0xFFEAF2FF),
         elevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_ios, color: Color(0xFF2E5AAC)),
+          onPressed: () => Navigator.pop(context),
+        ),
         title: const Text(
           "Mes Rappels",
           style: TextStyle(
             color: Color(0xFF2E5AAC),
             fontWeight: FontWeight.bold,
-            fontSize: 24,
+            fontSize: 22,
           ),
         ),
         centerTitle: true,
       ),
       floatingActionButton: Container(
+        width: 64,
+        height: 64,
         decoration: BoxDecoration(
+          shape: BoxShape.circle,
           gradient: const LinearGradient(
             colors: [Color(0xFF6EC6FF), Color(0xFF4A90E2)],
           ),
-          borderRadius: BorderRadius.circular(30),
+          boxShadow: [
+            BoxShadow(
+              color: const Color(0xFF4A90E2).withValues(alpha: 0.3),
+              blurRadius: 12,
+              offset: const Offset(0, 6),
+            ),
+          ],
         ),
-        child: FloatingActionButton.extended(
-          onPressed: _showTypeSelectionDialog,
+        child: FloatingActionButton(
+          onPressed: _showAddDialog,
           backgroundColor: Colors.transparent,
           elevation: 0,
-          icon: const Icon(Icons.add, color: Colors.white, size: 28),
-          label: const Text(
-            "Ajouter",
-            style: TextStyle(
-              color: Colors.white,
-              fontWeight: FontWeight.bold,
-              fontSize: 18,
-            ),
-          ),
+          child: const Icon(Icons.add_rounded, color: Colors.white, size: 32),
         ),
       ),
       body: Container(
@@ -486,91 +470,78 @@ class _RemindersScreenState extends State<RemindersScreen> {
           ),
         ),
         child: _isLoading
-            ? const Center(child: CircularProgressIndicator(color: Color(0xFF4A90E2)))
+            ? const Center(
+            child: CircularProgressIndicator(color: Color(0xFF4A90E2)))
             : _reminders.isEmpty
             ? _buildEmptyState()
             : RefreshIndicator(
           onRefresh: _loadReminders,
+          color: const Color(0xFF4A90E2),
           child: ListView(
             padding: const EdgeInsets.all(20),
-            children: [
-              if (pending.isNotEmpty) ...[
-                _buildSectionHeader("À faire"),
-                ...pending.map((r) => _buildReminderCard(r, false)),
-              ],
-              if (done.isNotEmpty) ...[
-                const SizedBox(height: 30),
-                _buildSectionHeader("Fait"),
-                ...done.map((r) => _buildReminderCard(r, true)),
-              ],
-            ],
+            children:
+            _reminders.map((r) => _buildReminderCard(r)).toList(),
           ),
         ),
       ),
     );
   }
 
-  Widget _buildSectionHeader(String title) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(8, 16, 8, 12),
-      child: Text(
-        title,
-        style: const TextStyle(
-          fontSize: 22,
-          fontWeight: FontWeight.bold,
-          color: Color(0xFF2E5AAC),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildReminderCard(Map<String, dynamic> reminder, bool isDone) {
+  Widget _buildReminderCard(Map<String, dynamic> reminder) {
     final title = reminder['title'] as String;
-    final type = reminder['type'] as String;
     final ts = reminder['date'] as Timestamp?;
     final docId = reminder['id'] as String;
+    final isDone = reminder['done'] as bool;
     final timeText = _formatTime(ts);
     final dateText = _formatDate(ts);
 
-    IconData icon = Icons.event;
-    Color color = const Color(0xFFFFB74D);
-
-    if (type == 'medication') {
-      icon = Icons.medication;
-      color = const Color(0xFFFF6B6B);
-    } else if (type == 'appointment') {
-      icon = Icons.calendar_today;
-      color = const Color(0xFF10B981);
-    }
-
-    return Card(
-      elevation: 2,
-      margin: const EdgeInsets.symmetric(vertical: 10),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      decoration: BoxDecoration(
+        color: isDone ? Colors.grey[100] : Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: isDone ? 0.04 : 0.08),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
       child: InkWell(
         borderRadius: BorderRadius.circular(20),
         onTap: () => _toggleDone(docId, isDone),
         child: Padding(
-          padding: const EdgeInsets.all(20),
+          padding: const EdgeInsets.all(18),
           child: Row(
             children: [
-              // Icône du type
               Container(
                 width: 56,
                 height: 56,
                 decoration: BoxDecoration(
-                  color: isDone ? Colors.grey[300] : color.withOpacity(0.15),
+                  gradient: isDone
+                      ? LinearGradient(
+                    colors: [Colors.grey[400]!, Colors.grey[500]!],
+                  )
+                      : const LinearGradient(
+                    colors: [Color(0xFFFFB74D), Color(0xFFFF9800)],
+                  ),
                   borderRadius: BorderRadius.circular(14),
+                  boxShadow: isDone
+                      ? []
+                      : [
+                    BoxShadow(
+                      color: const Color(0xFFFFB74D).withValues(alpha: 0.3),
+                      blurRadius: 8,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
                 ),
-                child: Icon(
-                  icon,
-                  color: isDone ? Colors.grey[600] : color,
-                  size: 28,
-                ),
+                child: const Icon(Icons.notifications_rounded,
+                    color: Colors.white, size: 28),
               ),
               const SizedBox(width: 16),
 
-              // Contenu
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -578,27 +549,46 @@ class _RemindersScreenState extends State<RemindersScreen> {
                     Text(
                       title,
                       style: TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.w600,
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: isDone ? Colors.grey[600] : const Color(0xFF2E5AAC),
                         decoration: isDone ? TextDecoration.lineThrough : null,
-                        color: isDone ? Colors.grey[600] : const Color(0xFF1F2937),
+                        decorationThickness: 2,
                       ),
                     ),
                     const SizedBox(height: 8),
                     Row(
                       children: [
-                        Icon(Icons.calendar_today, size: 16, color: Colors.grey[600]),
+                        Icon(
+                          Icons.calendar_today,
+                          size: 16,
+                          color: isDone ? Colors.grey[500] : Colors.grey[600],
+                        ),
                         const SizedBox(width: 6),
                         Text(
                           dateText,
-                          style: TextStyle(fontSize: 16, color: Colors.grey[700]),
+                          style: TextStyle(
+                            fontSize: 15,
+                            color: isDone ? Colors.grey[500] : Colors.grey[700],
+                            decoration:
+                            isDone ? TextDecoration.lineThrough : null,
+                          ),
                         ),
                         const SizedBox(width: 12),
-                        Icon(Icons.access_time, size: 16, color: Colors.grey[600]),
+                        Icon(
+                          Icons.access_time,
+                          size: 16,
+                          color: isDone ? Colors.grey[500] : Colors.grey[600],
+                        ),
                         const SizedBox(width: 6),
                         Text(
                           timeText,
-                          style: TextStyle(fontSize: 16, color: Colors.grey[700]),
+                          style: TextStyle(
+                            fontSize: 15,
+                            color: isDone ? Colors.grey[500] : Colors.grey[700],
+                            decoration:
+                            isDone ? TextDecoration.lineThrough : null,
+                          ),
                         ),
                       ],
                     ),
@@ -606,21 +596,30 @@ class _RemindersScreenState extends State<RemindersScreen> {
                 ),
               ),
 
-              // Checkbox et supprimer
               Column(
                 children: [
                   Icon(
                     isDone ? Icons.check_circle : Icons.radio_button_unchecked,
-                    color: isDone ? const Color(0xFF10B981) : const Color(0xFF9CA3AF),
+                    color: isDone
+                        ? const Color(0xFF66BB6A)
+                        : const Color(0xFF9CA3AF),
                     size: 36,
                   ),
                   const SizedBox(height: 8),
-                  InkWell(
+                  GestureDetector(
                     onTap: () => _deleteReminder(docId),
-                    child: const Icon(
-                      Icons.delete_outline,
-                      color: Colors.redAccent,
-                      size: 26,
+                    child: Container(
+                      width: 36,
+                      height: 36,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFF5F6D).withValues(alpha: 0.1),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(
+                        Icons.delete_outline_rounded,
+                        color: Color(0xFFFF5F6D),
+                        size: 20,
+                      ),
                     ),
                   ),
                 ],
@@ -637,23 +636,35 @@ class _RemindersScreenState extends State<RemindersScreen> {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.notifications_none_rounded, size: 100, color: Colors.grey[300]),
-          const SizedBox(height: 30),
+          Container(
+            width: 100,
+            height: 100,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: const Color(0xFF4A90E2).withValues(alpha: 0.1),
+            ),
+            child: const Icon(
+              Icons.notifications_none_rounded,
+              size: 50,
+              color: Color(0xFF4A90E2),
+            ),
+          ),
+          const SizedBox(height: 24),
           const Text(
             "Aucun rappel",
             style: TextStyle(
-              fontSize: 26,
+              fontSize: 24,
               fontWeight: FontWeight.bold,
               color: Color(0xFF2E5AAC),
             ),
           ),
-          const SizedBox(height: 16),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 40),
+          const SizedBox(height: 12),
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 40),
             child: Text(
-              "Appuyez sur + pour ajouter",
+              "Appuyez sur + pour ajouter un rappel",
               textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 18, color: Colors.grey[700]),
+              style: TextStyle(fontSize: 16, color: Colors.black54),
             ),
           ),
         ],

@@ -6,7 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 
 import 'fcm_service.dart';
-import 'notification_service.dart';
+
 
 class GeofencingService {
 
@@ -53,7 +53,7 @@ void _callbackDispatcher() {
 
     WidgetsFlutterBinding.ensureInitialized();
 
-    await NotificationService.initialize();
+
 
     try {
       await _checkGeofenceForCurrentUser();
@@ -227,7 +227,7 @@ Future<void> _createAlert(String uid, Position position, double distance) async 
     print("[Geofencing] ALERTE CREEE");
 
     // Notification locale au patient
-    await NotificationService.showGeofenceAlert(
+    await FCMService.showGeofenceAlert(
       distance: distance.toInt(),
     );
 

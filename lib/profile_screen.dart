@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'patient_caregiver_link_service.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -56,12 +55,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
       appBar: AppBar(
         backgroundColor: const Color(0xFFEAF2FF),
         elevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_ios, color: Color(0xFF2E5AAC)),
+          onPressed: () => Navigator.pop(context),
+        ),
         title: const Text(
-          "Mes Informations",
+          "Mon Profil",
           style: TextStyle(
             color: Color(0xFF2E5AAC),
             fontWeight: FontWeight.bold,
-            fontSize: 24,
+            fontSize: 22,
           ),
         ),
         centerTitle: true,
@@ -77,6 +80,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         child: SafeArea(
           child: RefreshIndicator(
             onRefresh: _loadProfile,
+            color: const Color(0xFF4A90E2),
             child: SingleChildScrollView(
               physics: const AlwaysScrollableScrollPhysics(),
               padding: const EdgeInsets.all(20),
@@ -84,10 +88,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 children: [
                   const SizedBox(height: 10),
 
-                  // Photo de profil
+                  // Avatar
                   Container(
-                    width: 120,
-                    height: 120,
+                    width: 100,
+                    height: 100,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
                       gradient: const LinearGradient(
@@ -95,144 +99,146 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       ),
                       boxShadow: [
                         BoxShadow(
-                          color: Colors.blue.withOpacity(0.3),
+                          color: const Color(0xFF4A90E2).withValues(alpha: 0.3),
                           blurRadius: 20,
-                          offset: const Offset(0, 5),
+                          offset: const Offset(0, 8),
                         ),
                       ],
                     ),
                     child: const Icon(
                       Icons.person,
-                      size: 60,
+                      size: 50,
                       color: Colors.white,
                     ),
                   ),
 
                   const SizedBox(height: 20),
 
-                  // Nom
                   Text(
                     _profileData?['name'] ?? "Mon nom",
                     style: const TextStyle(
-                      fontSize: 28,
+                      fontSize: 26,
                       fontWeight: FontWeight.bold,
                       color: Color(0xFF2E5AAC),
                     ),
                     textAlign: TextAlign.center,
                   ),
 
-                  const SizedBox(height: 40),
+                  const SizedBox(height: 30),
 
-                  // Section: Qui suis-je ?
-                  _buildSectionTitle("Qui suis-je ?"),
+                  // Section informations generales
+                  _buildSectionCard(
+                    'Informations generales',
+                    Icons.person_outline,
+                    [
+                      if ((_profileData?['age'] ?? 0) > 0)
+                        _buildInfoRow(
+                          Icons.cake_outlined,
+                          'Age',
+                          '${_profileData!['age']} ans',
+                          const Color(0xFF66BB6A),
+                        ),
+                      if ((_profileData?['diseaseStage'] ?? '').toString().isNotEmpty)
+                        _buildInfoRow(
+                          Icons.medical_information_outlined,
+                          'Stade de la maladie',
+                          _profileData!['diseaseStage'],
+                          const Color(0xFF4A90E2),
+                        ),
+                      if ((_profileData?['homeAddress'] ?? '').toString().isNotEmpty)
+                        _buildInfoRow(
+                          Icons.home_outlined,
+                          'Domicile',
+                          _profileData!['homeAddress'],
+                          const Color(0xFFFFB74D),
+                        ),
+                      if ((_profileData?['caregiverPhone'] ?? '').toString().isNotEmpty)
+                        _buildInfoRow(
+                          Icons.phone_outlined,
+                          'Telephone proche',
+                          _profileData!['caregiverPhone'],
+                          const Color(0xFF66BB6A),
+                        ),
+                    ],
+                  ),
+
                   const SizedBox(height: 16),
 
-                  _buildInfoCard(
-                    icon: Icons.person,
-                    label: "Mon nom",
-                    value: _profileData?['name'] ?? "Non renseigné",
-                    color: const Color(0xFF4A90E2),
+                  // Section informations medicales
+                  _buildSectionCard(
+                    'Informations medicales',
+                    Icons.medical_services_outlined,
+                    [
+                      if ((_profileData?['doctor'] ?? '').toString().isNotEmpty)
+                        _buildInfoRow(
+                          Icons.medical_services_outlined,
+                          'Medecin referent',
+                          _profileData!['doctor'],
+                          const Color(0xFF4A90E2),
+                        ),
+                      if ((_profileData?['treatment'] ?? '').toString().isNotEmpty)
+                        _buildInfoRow(
+                          Icons.medication_outlined,
+                          'Traitement',
+                          _profileData!['treatment'],
+                          const Color(0xFFFF6B6B),
+                        ),
+                      if ((_profileData?['allergies'] ?? '').toString().isNotEmpty)
+                        _buildInfoRow(
+                          Icons.warning_amber_outlined,
+                          'Allergies',
+                          _profileData!['allergies'],
+                          const Color(0xFFFF9800),
+                        ),
+                    ],
                   ),
 
-                  const SizedBox(height: 12),
-
-                  _buildInfoCard(
-                    icon: Icons.cake,
-                    label: "Mon âge",
-                    value: _profileData?['age'] != null
-                        ? "${_profileData!['age']} ans"
-                        : "Non renseigné",
-                    color: const Color(0xFF10B981),
-                  ),
-
-                  const SizedBox(height: 12),
-
-                  _buildInfoCard(
-                    icon: Icons.home,
-                    label: "Mon domicile",
-                    value: _profileData?['homeAddress'] ?? "Non renseigné",
-                    color: const Color(0xFFFFB74D),
-                  ),
-
-                  const SizedBox(height: 40),
-
-                  // Section: Mes contacts
-                  _buildSectionTitle("Mes contacts"),
-                  const SizedBox(height: 16),
-
-                  _buildInfoCard(
-                    icon: Icons.phone,
-                    label: "Mon proche",
-                    value: _profileData?['caregiverPhone'] ?? "Non renseigné",
-                    color: const Color(0xFF10B981),
-                  ),
-
-                  const SizedBox(height: 12),
-
-                  _buildInfoCard(
-                    icon: Icons.medical_services,
-                    label: "Mon médecin",
-                    value: _profileData?['doctor'] ?? "Non renseigné",
-                    color: const Color(0xFF4A90E2),
-                  ),
-
-                  const SizedBox(height: 40),
-
-                  // Section: Ma santé
-                  _buildSectionTitle("Ma santé"),
-                  const SizedBox(height: 16),
-
-                  _buildInfoCard(
-                    icon: Icons.warning,
-                    label: "Mes allergies",
-                    value: (_profileData?['allergies'] != null &&
-                        _profileData!['allergies'].toString().isNotEmpty)
-                        ? _profileData!['allergies']
-                        : "Aucune allergie",
-                    color: Colors.orange,
-                  ),
-
-                  const SizedBox(height: 12),
-
-                  _buildInfoCard(
-                    icon: Icons.medication,
-                    label: "Mon traitement",
-                    value: (_profileData?['treatment'] != null &&
-                        _profileData!['treatment'].toString().isNotEmpty)
-                        ? _profileData!['treatment']
-                        : "Aucun traitement",
-                    color: const Color(0xFFFF6B6B),
-                  ),
-
-                  if (_profileData?['diabetes'] != null &&
-                      _profileData!['diabetes'].toString().isNotEmpty) ...[
-                    const SizedBox(height: 12),
-                    _buildInfoCard(
-                      icon: Icons.bloodtype,
-                      label: "Diabète",
-                      value: _profileData!['diabetes'],
-                      color: const Color(0xFF9C27B0),
+                  // Section autres conditions (affiche seulement si au moins 1 champ rempli)
+                  if ((_profileData?['diabetes'] ?? '').toString().isNotEmpty ||
+                      (_profileData?['bloodPressure'] ?? '').toString().isNotEmpty ||
+                      (_profileData?['otherConditions'] ?? '').toString().isNotEmpty) ...[
+                    const SizedBox(height: 16),
+                    _buildSectionCard(
+                      'Autres conditions',
+                      Icons.health_and_safety_outlined,
+                      [
+                        if ((_profileData?['diabetes'] ?? '').toString().isNotEmpty)
+                          _buildInfoRow(
+                            Icons.bloodtype_outlined,
+                            'Diabete',
+                            _profileData!['diabetes'],
+                            const Color(0xFF9C27B0),
+                          ),
+                        if ((_profileData?['bloodPressure'] ?? '').toString().isNotEmpty)
+                          _buildInfoRow(
+                            Icons.favorite_outline,
+                            'Tension arterielle',
+                            _profileData!['bloodPressure'],
+                            const Color(0xFFE91E63),
+                          ),
+                        if ((_profileData?['otherConditions'] ?? '').toString().isNotEmpty)
+                          _buildInfoRow(
+                            Icons.health_and_safety_outlined,
+                            'Autres',
+                            _profileData!['otherConditions'],
+                            const Color(0xFF4A90E2),
+                          ),
+                      ],
                     ),
                   ],
 
-                  if (_profileData?['bloodPressure'] != null &&
-                      _profileData!['bloodPressure'].toString().isNotEmpty) ...[
-                    const SizedBox(height: 12),
-                    _buildInfoCard(
-                      icon: Icons.favorite,
-                      label: "Ma tension",
-                      value: _profileData!['bloodPressure'],
-                      color: const Color(0xFFE91E63),
-                    ),
-                  ],
+                  const SizedBox(height: 30),
 
-                  const SizedBox(height: 40),
-
-                  // Note pour le patient
+                  // Message info
                   Container(
-                    padding: const EdgeInsets.all(20),
+                    padding: const EdgeInsets.all(18),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF4A90E2).withOpacity(0.1),
+                      gradient: LinearGradient(
+                        colors: [
+                          const Color(0xFF4A90E2).withValues(alpha: 0.15),
+                          const Color(0xFF6EC6FF).withValues(alpha: 0.15),
+                        ],
+                      ),
                       borderRadius: BorderRadius.circular(16),
                       border: Border.all(
                         color: const Color(0xFF4A90E2),
@@ -244,16 +250,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         const Icon(
                           Icons.info_outline,
                           color: Color(0xFF4A90E2),
-                          size: 32,
+                          size: 28,
                         ),
-                        const SizedBox(width: 16),
+                        const SizedBox(width: 14),
                         Expanded(
                           child: Text(
-                            "Votre proche peut modifier ces informations si nécessaire",
+                            "Votre proche peut modifier ces informations",
                             style: TextStyle(
-                              fontSize: 16,
+                              fontSize: 15,
                               color: Colors.grey[800],
                               height: 1.4,
+                              fontWeight: FontWeight.w500,
                             ),
                           ),
                         ),
@@ -271,36 +278,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  Widget _buildSectionTitle(String title) {
-    return Row(
-      children: [
-        Container(
-          width: 4,
-          height: 24,
-          decoration: BoxDecoration(
-            color: const Color(0xFF4A90E2),
-            borderRadius: BorderRadius.circular(2),
-          ),
-        ),
-        const SizedBox(width: 12),
-        Text(
-          title,
-          style: const TextStyle(
-            fontSize: 22,
-            fontWeight: FontWeight.bold,
-            color: Color(0xFF2E5AAC),
-          ),
-        ),
-      ],
-    );
-  }
+  Widget _buildSectionCard(String title, IconData icon, List<Widget> children) {
+    // Ne pas afficher la section si aucun enfant
+    if (children.isEmpty) return const SizedBox.shrink();
 
-  Widget _buildInfoCard({
-    required IconData icon,
-    required String label,
-    required String value,
-    required Color color,
-  }) {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(20),
@@ -309,57 +290,83 @@ class _ProfileScreenState extends State<ProfileScreen> {
         borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 10,
+            color: Colors.black.withValues(alpha: 0.08),
+            blurRadius: 15,
             offset: const Offset(0, 4),
           ),
         ],
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Icône
-          Container(
-            width: 56,
-            height: 56,
-            decoration: BoxDecoration(
-              color: color.withOpacity(0.15),
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: Icon(
-              icon,
-              color: color,
-              size: 28,
-            ),
+          Row(
+            children: [
+              Icon(icon, color: const Color(0xFF4A90E2), size: 24),
+              const SizedBox(width: 10),
+              Text(
+                title,
+                style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: Color(0xFF2E5AAC),
+                ),
+              ),
+            ],
           ),
-          const SizedBox(width: 16),
-
-          // Contenu
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+          const SizedBox(height: 16),
+          ...children.map((child) {
+            final index = children.indexOf(child);
+            return Column(
               children: [
-                Text(
-                  label,
-                  style: TextStyle(
-                    fontSize: 14,
-                    color: Colors.grey[600],
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  value,
-                  style: const TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                    color: Color(0xFF2E5AAC),
-                  ),
-                ),
+                if (index > 0) const SizedBox(height: 12),
+                child,
               ],
-            ),
-          ),
+            );
+          }),
         ],
       ),
+    );
+  }
+
+  Widget _buildInfoRow(IconData icon, String label, String value, Color color) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: 40,
+          height: 40,
+          decoration: BoxDecoration(
+            color: color.withValues(alpha: 0.15),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Icon(icon, color: color, size: 22),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                label,
+                style: const TextStyle(
+                  fontSize: 14,
+                  color: Colors.black45,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                value,
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFF2E5AAC),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }

@@ -20,15 +20,26 @@
     <!-- Notifications -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
 
-    <!-- AJOUTER : Vibration pour notifications -->
+    <!-- Capteurs pour detection chute -->
+    <uses-feature android:name="android.hardware.sensor.accelerometer" android:required="true"/>
+    <uses-feature android:name="android.hardware.sensor.gyroscope" android:required="true"/>
+
+    <!-- Vibration pour notifications -->
     <uses-permission android:name="android.permission.VIBRATE"/>
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"/>
+
+    <!-- Caméra pour reconnaissance faciale -->
+    <uses-permission android:name="android.permission.CAMERA"/>
+    <uses-feature android:name="android.hardware.camera" android:required="false"/>
+    <uses-feature android:name="android.hardware.camera.front" android:required="false"/>
+
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>
 
     <application
         android:label="alzhecare"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
-
-        <!-- ========== AJOUTER CES LIGNES (AVANT <activity>) ========== -->
 
         <!-- Service FCM pour notifications en arrière-plan -->
         <service
@@ -54,7 +65,26 @@
             android:name="com.google.firebase.messaging.default_notification_color"
             android:resource="@android:color/holo_blue_dark" />
 
-        <!-- ========== FIN DES AJOUTS FCM ========== -->
+        <!-- ========== AJOUT ICI : RECEIVERS POUR NOTIFICATIONS LOCALES ========== -->
+
+        <!-- Receiver pour notifications programmées -->
+        <receiver
+            android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationReceiver"
+            android:exported="false"/>
+
+        <!-- Receiver pour redémarrage du téléphone (re-programmer les notifications) -->
+        <receiver
+            android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationBootReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED"/>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED"/>
+                <action android:name="android.intent.action.QUICKBOOT_POWERON"/>
+                <action android:name="com.htc.intent.action.QUICKBOOT_POWERON"/>
+            </intent-filter>
+        </receiver>
+
+        <!-- ================================================================== -->
 
         <activity
             android:name=".MainActivity"

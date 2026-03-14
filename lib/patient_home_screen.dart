@@ -3,6 +3,8 @@ import 'package:alzhecare/reminders_screen.dart';
 import 'package:alzhecare/profile_screen.dart';
 import 'package:alzhecare/find_home_screen.dart';
 import 'package:alzhecare/sign_in_screen.dart';
+import 'package:alzhecare/routine_settings_screen.dart';
+import 'package:alzhecare/patient_fall_monitor_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -53,13 +55,12 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
     }
   }
 
-  /// Démarrer le tracking GPS en arrière-plan
   Future<void> _startGeofencing() async {
     try {
       await GeofencingService.startTracking(intervalMinutes: 10);
-      print("[PatientHome] Tracking GPS démarré");
+      debugPrint("[PatientHome] Tracking GPS démarré");
     } catch (e) {
-      print("[PatientHome] Erreur démarrage tracking: $e");
+      debugPrint("[PatientHome] Erreur démarrage tracking: $e");
     }
   }
 
@@ -67,28 +68,61 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
 
-    await FirebaseFirestore.instance
+    final userDoc = await FirebaseFirestore.instance
         .collection('users')
         .doc(user.uid)
-        .collection('alerts')
+        .get();
+
+    final linkedCaregiver = userDoc.data()?['linkedCaregiver'];
+
+    if (linkedCaregiver == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Aucun proche associé"),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
+      return;
+    }
+
+    GeoPoint? location;
+    final locationDoc = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(user.uid)
+        .collection('locations')
+        .orderBy('timestamp', descending: true)
+        .limit(1)
+        .get();
+
+    if (locationDoc.docs.isNotEmpty) {
+      location = locationDoc.docs.first.data()['location'] as GeoPoint?;
+    }
+
+    await FirebaseFirestore.instance
+        .collection('notifications')
         .add({
-      'type': 'SOS',
-      'message': 'Alerte SOS déclenchée',
+      'caregiverId': linkedCaregiver,
+      'patientId': user.uid,
+      'type': 'sos',
+      'title': 'SOS',
+      'message': 'Le patient a déclenché une alerte SOS',
+      'location': location,
       'timestamp': FieldValue.serverTimestamp(),
-      'status': 'urgent',
+      'status': 'pending',
     });
 
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text("Alerte SOS envoyée"),
+          content: Text("Alerte SOS envoyée à votre proche"),
           backgroundColor: Color(0xFFFF5F6D),
         ),
       );
     }
   }
 
-  /// Déconnexion avec arrêt du tracking
   Future<void> _logout() async {
     final confirm = await showDialog<bool>(
       context: context,
@@ -102,7 +136,7 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
             child: const Text("Annuler"),
           ),
           ElevatedButton(
-            onPressed: () {Navigator.push(context, MaterialPageRoute(builder: (_)=>SignInScreen()));},
+            onPressed: () => Navigator.pop(ctx, true),
             style: ElevatedButton.styleFrom(
               backgroundColor: const Color(0xFF2E5AAC),
             ),
@@ -115,20 +149,18 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
     if (confirm != true) return;
 
     try {
-      // Arrêter le tracking GPS
       await GeofencingService.stopTracking();
-
-      // Effacer la session locale
       await UserSessionManager.clearSession();
-
-      // Déconnexion Firebase
       await FirebaseAuth.instance.signOut();
 
       if (mounted) {
-        Navigator.of(context).popUntil((route) => route.isFirst);
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(builder: (_) => const SignInScreen()),
+              (route) => false,
+        );
       }
     } catch (e) {
-      print("[PatientHome] Erreur logout: $e");
+      debugPrint("[PatientHome] Erreur logout: $e");
     }
   }
 
@@ -149,7 +181,6 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
           child: Column(
             children: [
 
-              /// HEADER
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
@@ -167,20 +198,37 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
                       color: Color(0xFF2E5AAC),
                     ),
                   ),
-                  IconButton(
-                    icon: const Icon(Icons.person, color: Color(0xFF2E5AAC)),
-                    onPressed: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(builder: (_) => const ProfileScreen()),
-                      );
-                    },
+                  Row(
+                    children: [
+                      IconButton(
+                        icon: const Icon(
+                          Icons.notifications_active,
+                          color: Color(0xFF2E5AAC),
+                        ),
+                        onPressed: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => const RoutineSettingsScreen(),
+                            ),
+                          );
+                        },
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.person, color: Color(0xFF2E5AAC)),
+                        onPressed: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(builder: (_) => const ProfileScreen()),
+                          );
+                        },
+                      ),
+                    ],
                   ),
                 ],
               ),
 
               const SizedBox(height: 20),
-
 
               Container(
                 width: 110,
@@ -224,7 +272,61 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
 
               const SizedBox(height: 35),
 
-              /// GRID 2x2
+              StreamBuilder<QuerySnapshot>(
+                stream: FirebaseFirestore.instance
+                    .collection('users')
+                    .doc(FirebaseAuth.instance.currentUser!.uid)
+                    .collection('reminders')
+                    .orderBy('date', descending: true)
+                    .limit(1)
+                    .snapshots(),
+                builder: (context, snapshot) {
+
+                  bool hasReminder =
+                      snapshot.hasData && snapshot.data!.docs.isNotEmpty;
+
+                  String reminderText = "Aucun rappel pour le moment";
+
+                  if (hasReminder) {
+                    reminderText =
+                        snapshot.data!.docs.first.get('title') ?? "Rappel";
+                  }
+
+                  return Container(
+                    width: double.infinity,
+                    margin: const EdgeInsets.only(bottom: 25),
+                    padding: const EdgeInsets.symmetric(vertical: 15, horizontal: 20),
+                    decoration: BoxDecoration(
+                      gradient: hasReminder
+                          ? const LinearGradient(
+                        colors: [
+                          Color(0xFF7FB3FF),
+                          Color(0xFF2EC7F0),
+                        ],
+                      )
+                          : null,
+                      color: hasReminder ? null : Colors.white,
+                      borderRadius: BorderRadius.circular(20),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.1),
+                          blurRadius: 10,
+                        )
+                      ],
+                    ),
+                    child: Text(
+                      reminderText,
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                        color: hasReminder ? Colors.white : Colors.black87,
+                      ),
+                    ),
+                  );
+                },
+              ),
+
+              // GRILLE 2x2
               GridView.count(
                 crossAxisCount: 2,
                 shrinkWrap: true,
@@ -296,9 +398,60 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
                 ],
               ),
 
+              const SizedBox(height: 25),
+
+              // DETECTION CHUTE CENTREE
+              Center(
+                child: SizedBox(
+                  width: 180,
+                  height: 180,
+                  child: GestureDetector(
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => const PatientFallMonitorScreen()),
+                      );
+                    },
+                    child: Container(
+                      decoration: BoxDecoration(
+                        gradient: const LinearGradient(
+                          colors: [
+                            Color(0xFFFF5F6D),
+                            Color(0xFFFFC371),
+                          ],
+                        ),
+                        borderRadius: BorderRadius.circular(25),
+                        boxShadow: [
+                          BoxShadow(
+                            color: const Color(0xFFFF5F6D).withOpacity(0.3),
+                            blurRadius: 15,
+                            offset: const Offset(0, 8),
+                          ),
+                        ],
+                      ),
+                      child: const Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.warning_amber_rounded, size: 50, color: Colors.white),
+                          SizedBox(height: 12),
+                          Text(
+                            "Détection\nChute",
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+
               const SizedBox(height: 40),
 
-              /// SOS
               GestureDetector(
                 onTap: _sendSOS,
                 child: Container(
@@ -341,7 +494,6 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
     );
   }
 
-  /// Menu latéral avec options
   void _showMenu(BuildContext context) {
     showModalBottomSheet(
       context: context,
@@ -378,7 +530,6 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
               onTap: () async {
                 Navigator.pop(ctx);
 
-                // Afficher un loading
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(
                     content: Row(
@@ -400,12 +551,10 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
                   ),
                 );
 
-                // Attendre un peu pour le test
                 await Future.delayed(const Duration(seconds: 2));
                 await GeofencingService.checkNow();
 
                 if (mounted) {
-                  // Récupérer les infos depuis Firestore
                   final user = FirebaseAuth.instance.currentUser;
                   if (user != null) {
                     final doc = await FirebaseFirestore.instance

@@ -7,7 +7,7 @@ plugins {
 
 android {
     namespace = "com.example.alzhecare"
-    compileSdk = 34  // CHANGÉ : Spécifie 34 au lieu de flutter.compileSdkVersion
+    compileSdk = 36
     ndkVersion = "27.0.12077973"
 
     compileOptions {
@@ -22,8 +22,8 @@ android {
 
     defaultConfig {
         applicationId = "com.example.alzhecare"
-        minSdk = 23  // CHANGÉ : Au moins 23 pour FCM
-        targetSdk = 34  // CHANGÉ : Correspond à compileSdk
+        minSdk = flutter.minSdkVersion
+        targetSdk = 34
         versionCode = 1
         versionName = "1.0"
 

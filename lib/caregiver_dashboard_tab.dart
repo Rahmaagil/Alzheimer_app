@@ -17,7 +17,10 @@ class _CaregiverDashboardTabState extends State<CaregiverDashboardTab> {
   bool _isLoading = true;
 
   @override
-  void initState() { super.initState(); _loadData(); }
+  void initState() {
+    super.initState();
+    _loadData();
+  }
 
   Future<void> _loadData() async {
     setState(() => _isLoading = true);
@@ -26,26 +29,39 @@ class _CaregiverDashboardTabState extends State<CaregiverDashboardTab> {
       if (user == null) return;
 
       final suiveurDoc = await FirebaseFirestore.instance
-          .collection('users').doc(user.uid).get();
+          .collection('users')
+          .doc(user.uid)
+          .get();
       String? patientUid = suiveurDoc.data()?['linkedPatient'];
 
       if (patientUid == null) {
         final p = await FirebaseFirestore.instance
             .collection('users')
             .where('role', isEqualTo: 'patient')
-            .limit(1).get();
+            .limit(1)
+            .get();
         if (p.docs.isNotEmpty) patientUid = p.docs.first.id;
       }
-      if (patientUid == null) { setState(() => _isLoading = false); return; }
+      if (patientUid == null) {
+        setState(() => _isLoading = false);
+        return;
+      }
 
       final patDoc = await FirebaseFirestore.instance
-          .collection('users').doc(patientUid).get();
+          .collection('users')
+          .doc(patientUid)
+          .get();
       _patientData = patDoc.data();
       _lastPosition = _patientData?['lastPosition'];
 
       final alertsSnap = await FirebaseFirestore.instance
-          .collection('users').doc(patientUid)
-          .collection('alerts').get();
+          .collection('users')
+          .doc(patientUid)
+          .collection('alerts')
+          .where('status', whereIn: ['pending', 'seen'])
+          .orderBy('timestamp', descending: true)
+          .limit(10)
+          .get();
 
       final list = alertsSnap.docs.map((d) {
         final data = d.data();
@@ -89,7 +105,7 @@ class _CaregiverDashboardTabState extends State<CaregiverDashboardTab> {
   String _timeAgo(Timestamp? ts) {
     if (ts == null) return 'Inconnue';
     final diff = DateTime.now().difference(ts.toDate());
-    if (diff.inMinutes < 1) return 'À l\'instant';
+    if (diff.inMinutes < 1) return 'A l\'instant';
     if (diff.inMinutes < 60) return 'Il y a ${diff.inMinutes} min';
     if (diff.inHours < 24) return 'Il y a ${diff.inHours}h';
     return 'Il y a ${diff.inDays}j';
@@ -98,7 +114,7 @@ class _CaregiverDashboardTabState extends State<CaregiverDashboardTab> {
   String _formatTime(Timestamp? ts) {
     if (ts == null) return '--:--';
     final d = ts.toDate();
-    return '${d.hour.toString().padLeft(2,'0')}:${d.minute.toString().padLeft(2,'0')}';
+    return '${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
   }
 
   @override
@@ -109,21 +125,23 @@ class _CaregiverDashboardTabState extends State<CaregiverDashboardTab> {
         elevation: 0,
         title: const Text(
           "Tableau de bord",
-          style: TextStyle(color: Color(0xFF2E5AAC),
-              fontWeight: FontWeight.bold, fontSize: 22),
+          style: TextStyle(
+              color: Color(0xFF2E5AAC),
+              fontWeight: FontWeight.bold,
+              fontSize: 22),
         ),
         centerTitle: true,
         actions: [
-          // Icône Settings uniquement
           IconButton(
             icon: const Icon(Icons.settings_rounded, color: Color(0xFF2E5AAC)),
             onPressed: () {
               Navigator.push(
                 context,
-                MaterialPageRoute(builder: (_) => const CaregiverSettingsScreen()),
+                MaterialPageRoute(
+                    builder: (_) => const CaregiverSettingsScreen()),
               );
             },
-            tooltip: 'Paramètres',
+            tooltip: 'Parametres',
           ),
         ],
       ),
@@ -138,199 +156,410 @@ class _CaregiverDashboardTabState extends State<CaregiverDashboardTab> {
           ),
         ),
         child: _isLoading
-            ? const Center(child: CircularProgressIndicator(
-            color: Color(0xFF4A90E2)))
+            ? const Center(
+            child:
+            CircularProgressIndicator(color: Color(0xFF4A90E2)))
             : RefreshIndicator(
           onRefresh: _loadData,
+          color: const Color(0xFF4A90E2),
           child: SingleChildScrollView(
             physics: const AlwaysScrollableScrollPhysics(),
             padding: const EdgeInsets.all(20),
-            child: Column(children: [
-
-              // ── LOGO ──
-              Container(
-                  width: 90, height: 90,
+            child: Column(
+              children: [
+                // BADGE AVATAR
+                Container(
+                  width: 100,
+                  height: 100,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
                     gradient: const LinearGradient(
-                        colors: [Color(0xFF6EC6FF), Color(0xFF4A90E2)]),
-                    boxShadow: [BoxShadow(
-                        color: Colors.blue.withOpacity(0.3), blurRadius: 20)],
+                      colors: [Color(0xFF6EC6FF), Color(0xFF4A90E2)],
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: const Color(0xFF4A90E2).withValues(alpha: 0.3),
+                        blurRadius: 20,
+                        offset: const Offset(0, 8),
+                      ),
+                    ],
                   ),
-                  child: const Icon(Icons.psychology,
-                      color: Colors.white, size: 45)),
-
-              const SizedBox(height: 20),
-
-              Text(
-                  _patientData?['name'] ?? 'Patient',
-                  style: const TextStyle(fontSize: 28,
-                      fontWeight: FontWeight.bold,
-                      color: Color(0xFF2E5AAC))),
-
-              const SizedBox(height: 30),
-
-              // ── STATUT ──
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(24),
-                decoration: BoxDecoration(
-                  gradient: _isSafe
-                      ? const LinearGradient(
-                      colors: [Color(0xFF81C784), Color(0xFF66BB6A)])
-                      : const LinearGradient(
-                      colors: [Color(0xFFFF5F6D), Color(0xFFFF2E63)]),
-                  borderRadius: BorderRadius.circular(22),
-                ),
-                child: Column(children: [
-                  Icon(_isSafe ? Icons.check_circle : Icons.warning_rounded,
+                  child: const Icon(Icons.person,
                       color: Colors.white, size: 50),
-                  const SizedBox(height: 12),
-                  Text(
-                      _isSafe ? 'En Sécurité' : 'Alerte Active',
-                      style: const TextStyle(fontSize: 24,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.white)),
-                  const SizedBox(height: 8),
-                  Text(
-                      _lastPosition != null
-                          ? 'Position GPS disponible'
-                          : 'Position inconnue',
-                      style: const TextStyle(fontSize: 16,
-                          color: Colors.white70)),
-                ]),
-              ),
-
-              const SizedBox(height: 20),
-
-              // ── DERNIÈRE POSITION ──
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(20),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(22),
-                  boxShadow: [BoxShadow(
-                      color: Colors.black.withOpacity(0.06),
-                      blurRadius: 15)],
                 ),
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start,
+
+                const SizedBox(height: 16),
+
+                Text(
+                  _patientData?['name'] ?? 'Patient',
+                  style: const TextStyle(
+                    fontSize: 28,
+                    fontWeight: FontWeight.bold,
+                    color: Color(0xFF2E5AAC),
+                  ),
+                ),
+
+                const SizedBox(height: 30),
+
+                // STATUT
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(24),
+                  decoration: BoxDecoration(
+                    gradient: _isSafe
+                        ? const LinearGradient(
+                      colors: [
+                        Color(0xFF81C784),
+                        Color(0xFF66BB6A)
+                      ],
+                    )
+                        : const LinearGradient(
+                      colors: [
+                        Color(0xFFFF5F6D),
+                        Color(0xFFFF2E63)
+                      ],
+                    ),
+                    borderRadius: BorderRadius.circular(22),
+                    boxShadow: [
+                      BoxShadow(
+                        color: _isSafe
+                            ? const Color(0xFF66BB6A).withValues(alpha: 0.3)
+                            : const Color(0xFFFF5F6D).withValues(alpha: 0.3),
+                        blurRadius: 12,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
+                  ),
+                  child: Column(
                     children: [
-                      const Row(children: [
-                        Icon(Icons.location_on,
-                            color: Color(0xFF4A90E2), size: 22),
-                        SizedBox(width: 8),
-                        Text('Dernière position',
-                            style: TextStyle(fontSize: 18,
-                                fontWeight: FontWeight.bold,
-                                color: Color(0xFF2E5AAC))),
-                      ]),
+                      Icon(
+                        _isSafe
+                            ? Icons.check_circle_rounded
+                            : Icons.warning_rounded,
+                        color: Colors.white,
+                        size: 60,
+                      ),
                       const SizedBox(height: 16),
+                      Text(
+                        _isSafe ? 'En Securite' : 'Alerte Active',
+                        style: const TextStyle(
+                          fontSize: 26,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        _lastPosition != null
+                            ? 'Position GPS disponible'
+                            : 'Position inconnue',
+                        style: const TextStyle(
+                          fontSize: 16,
+                          color: Colors.white70,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
+                const SizedBox(height: 20),
+
+                // DERNIERE POSITION
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(22),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.08),
+                        blurRadius: 15,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Row(
+                        children: [
+                          Icon(Icons.location_on,
+                              color: Color(0xFF4A90E2), size: 24),
+                          SizedBox(width: 10),
+                          Text(
+                            'Derniere position',
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                              color: Color(0xFF2E5AAC),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 18),
 
                       if (_lastPosition == null)
-                        const Center(child: Padding(
-                            padding: EdgeInsets.symmetric(vertical: 12),
-                            child: Text('Aucune position disponible',
-                                style: TextStyle(fontSize: 16,
-                                    color: Colors.black38))))
+                        const Center(
+                          child: Padding(
+                            padding: EdgeInsets.symmetric(vertical: 16),
+                            child: Text(
+                              'Aucune position disponible',
+                              style: TextStyle(
+                                fontSize: 16,
+                                color: Colors.black38,
+                              ),
+                            ),
+                          ),
+                        )
                       else ...[
-                        Text(
-                            'Lat: ${(_lastPosition!['latitude'] as num).toStringAsFixed(5)}'
-                                '   Lng: ${(_lastPosition!['longitude'] as num).toStringAsFixed(5)}',
-                            style: const TextStyle(fontSize: 15,
-                                color: Colors.black54)),
-                        const SizedBox(height: 8),
-                        Text(_timeAgo(_lastPosition?['updatedAt']),
-                            style: const TextStyle(fontSize: 15,
-                                color: Colors.black45)),
-                        const SizedBox(height: 16),
-
-                        SizedBox(width: double.infinity, height: 50,
-                            child: ElevatedButton(
-                              onPressed: () {
-                                Navigator.push(context, MaterialPageRoute(builder: (_)=>CaregiverMapTab()));
-                              },
-                              style: ElevatedButton.styleFrom(
-                                  shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(30)),
-                                  padding: EdgeInsets.zero,
-                                  backgroundColor: Colors.transparent,
-                                  elevation: 0),
-                              child: Ink(
-                                decoration: const BoxDecoration(
-                                    gradient: LinearGradient(
-                                        colors: [Color(0xFF7FB3FF),
-                                          Color(0xFF2EC7F0)]),
-                                    borderRadius: BorderRadius.all(
-                                        Radius.circular(30))),
-                                child: const Center(
-                                  child: Row(
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    children: [
-                                      Icon(Icons.map_rounded,
-                                          color: Colors.white, size: 20),
-                                      SizedBox(width: 10),
-                                      Text('Voir sur la carte',
-                                          style: TextStyle(fontSize: 16,
-                                              fontWeight: FontWeight.bold,
-                                              color: Colors.white)),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Container(
+                                padding: const EdgeInsets.all(14),
+                                decoration: BoxDecoration(
+                                  gradient: const LinearGradient(
+                                    colors: [
+                                      Color(0xFF6EC6FF),
+                                      Color(0xFF4A90E2)
                                     ],
                                   ),
+                                  borderRadius:
+                                  BorderRadius.circular(14),
+                                ),
+                                child: Column(
+                                  children: [
+                                    const Icon(Icons.my_location,
+                                        color: Colors.white, size: 24),
+                                    const SizedBox(height: 8),
+                                    Text(
+                                      '${(_lastPosition!['latitude'] as num).toStringAsFixed(5)}',
+                                      style: const TextStyle(
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.white,
+                                      ),
+                                    ),
+                                    const Text(
+                                      'Latitude',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: Colors.white70,
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ),
-                            )),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Container(
+                                padding: const EdgeInsets.all(14),
+                                decoration: BoxDecoration(
+                                  gradient: const LinearGradient(
+                                    colors: [
+                                      Color(0xFF7FB3FF),
+                                      Color(0xFF2EC7F0)
+                                    ],
+                                  ),
+                                  borderRadius:
+                                  BorderRadius.circular(14),
+                                ),
+                                child: Column(
+                                  children: [
+                                    const Icon(Icons.explore,
+                                        color: Colors.white, size: 24),
+                                    const SizedBox(height: 8),
+                                    Text(
+                                      '${(_lastPosition!['longitude'] as num).toStringAsFixed(5)}',
+                                      style: const TextStyle(
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.white,
+                                      ),
+                                    ),
+                                    const Text(
+                                      'Longitude',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: Colors.white70,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 14),
+                        Row(
+                          children: [
+                            const Icon(Icons.access_time,
+                                color: Color(0xFF4A90E2), size: 18),
+                            const SizedBox(width: 8),
+                            Text(
+                              _timeAgo(_lastPosition?['updatedAt']),
+                              style: const TextStyle(
+                                fontSize: 15,
+                                color: Colors.black54,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 18),
+
+                        SizedBox(
+                          width: double.infinity,
+                          height: 52,
+                          child: ElevatedButton(
+                            onPressed: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                    builder: (_) =>
+                                    const CaregiverMapTab()),
+                              );
+                            },
+                            style: ElevatedButton.styleFrom(
+                              shape: RoundedRectangleBorder(
+                                borderRadius:
+                                BorderRadius.circular(30),
+                              ),
+                              padding: EdgeInsets.zero,
+                              backgroundColor: Colors.transparent,
+                              elevation: 0,
+                            ),
+                            child: Ink(
+                              decoration: const BoxDecoration(
+                                gradient: LinearGradient(
+                                  colors: [
+                                    Color(0xFF7FB3FF),
+                                    Color(0xFF2EC7F0)
+                                  ],
+                                ),
+                                borderRadius: BorderRadius.all(
+                                    Radius.circular(30)),
+                              ),
+                              child: const Center(
+                                child: Row(
+                                  mainAxisAlignment:
+                                  MainAxisAlignment.center,
+                                  children: [
+                                    Icon(Icons.map_rounded,
+                                        color: Colors.white, size: 22),
+                                    SizedBox(width: 10),
+                                    Text(
+                                      'Voir sur la carte',
+                                      style: TextStyle(
+                                        fontSize: 17,
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.white,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
                       ],
-                    ]),
-              ),
-
-              const SizedBox(height: 20),
-
-              // ── ALERTES RÉCENTES ──
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(20),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(22),
-                  boxShadow: [BoxShadow(
-                      color: Colors.black.withOpacity(0.06),
-                      blurRadius: 15)],
+                    ],
+                  ),
                 ),
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start,
+
+                const SizedBox(height: 20),
+
+                // ALERTES RECENTES
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(22),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.08),
+                        blurRadius: 15,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            const Row(children: [
-                              Icon(Icons.notifications,
-                                  color: Color(0xFFFFB74D), size: 22),
-                              SizedBox(width: 8),
-                              Text('Alertes récentes',
-                                  style: TextStyle(fontSize: 18,
-                                      fontWeight: FontWeight.bold,
-                                      color: Color(0xFF2E5AAC))),
-                            ]),
-                            if (_recentAlerts.isNotEmpty)
-                              Container(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 10, vertical: 4),
-                                  decoration: BoxDecoration(
-                                      color: const Color(0xFFFF5F6D).withOpacity(0.12),
-                                      borderRadius: BorderRadius.circular(20)),
-                                  child: Text('${_recentAlerts.length}',
-                                      style: const TextStyle(fontSize: 14,
-                                          fontWeight: FontWeight.bold,
-                                          color: Color(0xFFFF5F6D)))),
-                          ]),
-                      const SizedBox(height: 14),
+                        mainAxisAlignment:
+                        MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Row(
+                            children: [
+                              Icon(Icons.notifications_rounded,
+                                  color: Color(0xFFFFB74D), size: 24),
+                              SizedBox(width: 10),
+                              Text(
+                                'Alertes recentes',
+                                style: TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.bold,
+                                  color: Color(0xFF2E5AAC),
+                                ),
+                              ),
+                            ],
+                          ),
+                          if (_recentAlerts.isNotEmpty)
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 12, vertical: 6),
+                              decoration: BoxDecoration(
+                                gradient: const LinearGradient(
+                                  colors: [
+                                    Color(0xFFFF5F6D),
+                                    Color(0xFFFFC371)
+                                  ],
+                                ),
+                                borderRadius:
+                                BorderRadius.circular(20),
+                              ),
+                              child: Text(
+                                '${_recentAlerts.length}',
+                                style: const TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.white,
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                      const SizedBox(height: 18),
 
                       if (_recentAlerts.isEmpty)
-                        const Center(child: Padding(
-                            padding: EdgeInsets.symmetric(vertical: 12),
-                            child: Text('Aucune alerte ✓',
-                                style: TextStyle(fontSize: 16,
+                        Center(
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                                vertical: 16),
+                            child: Column(
+                              children: [
+                                Icon(
+                                  Icons.check_circle_outline,
+                                  color: const Color(0xFF4CAF50)
+                                      .withValues(alpha: 0.6),
+                                  size: 48,
+                                ),
+                                const SizedBox(height: 12),
+                                const Text(
+                                  'Aucune alerte',
+                                  style: TextStyle(
+                                    fontSize: 17,
                                     color: Color(0xFF4CAF50),
-                                    fontWeight: FontWeight.w500))))
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        )
                       else
                         ..._recentAlerts.take(3).map((a) {
                           final type = a['type'] as String;
@@ -341,39 +570,90 @@ class _CaregiverDashboardTabState extends State<CaregiverDashboardTab> {
                           final icon = isSOS
                               ? Icons.warning_rounded
                               : Icons.location_off;
-                          final label = isSOS ? 'Alerte SOS'
-                              : type == 'perdu' ? 'Sortie de zone' : type;
+                          final label = isSOS
+                              ? 'Alerte SOS'
+                              : type == 'perdu'
+                              ? 'Sortie de zone'
+                              : type;
 
                           return Container(
-                            margin: const EdgeInsets.only(bottom: 10),
-                            padding: const EdgeInsets.all(14),
+                            margin:
+                            const EdgeInsets.only(bottom: 12),
+                            padding: const EdgeInsets.all(16),
                             decoration: BoxDecoration(
-                                color: color.withOpacity(0.06),
-                                borderRadius: BorderRadius.circular(14),
-                                border: Border(
-                                    left: BorderSide(color: color, width: 4))),
-                            child: Row(children: [
-                              Icon(icon, color: color, size: 24),
-                              const SizedBox(width: 12),
-                              Expanded(child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(label,
-                                        style: const TextStyle(fontSize: 16,
-                                            fontWeight: FontWeight.bold,
-                                            color: Color(0xFF2E5AAC))),
-                                    Text(_formatTime(a['timestamp']),
-                                        style: const TextStyle(fontSize: 14,
-                                            color: Colors.black45)),
-                                  ])),
-                            ]),
+                              gradient: LinearGradient(
+                                colors: isSOS
+                                    ? [
+                                  const Color(0xFFFF5F6D),
+                                  const Color(0xFFFFC371)
+                                ]
+                                    : [
+                                  const Color(0xFFFFB74D),
+                                  const Color(0xFFFFA726)
+                                ],
+                              ),
+                              borderRadius:
+                              BorderRadius.circular(16),
+                              boxShadow: [
+                                BoxShadow(
+                                  color:
+                                  color.withValues(alpha: 0.3),
+                                  blurRadius: 8,
+                                  offset: const Offset(0, 4),
+                                ),
+                              ],
+                            ),
+                            child: Row(
+                              children: [
+                                Container(
+                                  width: 48,
+                                  height: 48,
+                                  decoration: BoxDecoration(
+                                    color: Colors.white
+                                        .withValues(alpha: 0.3),
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: Icon(icon,
+                                      color: Colors.white, size: 26),
+                                ),
+                                const SizedBox(width: 14),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                    CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        label,
+                                        style: const TextStyle(
+                                          fontSize: 17,
+                                          fontWeight: FontWeight.bold,
+                                          color: Colors.white,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        _formatTime(a['timestamp']),
+                                        style: const TextStyle(
+                                          fontSize: 14,
+                                          color: Colors.white70,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                const Icon(Icons.arrow_forward_ios,
+                                    color: Colors.white, size: 18),
+                              ],
+                            ),
                           );
                         }),
-                    ]),
-              ),
+                    ],
+                  ),
+                ),
 
-              const SizedBox(height: 20),
-            ]),
+                const SizedBox(height: 20),
+              ],
+            ),
           ),
         ),
       ),

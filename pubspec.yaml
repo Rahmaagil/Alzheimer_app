@@ -56,6 +56,10 @@ dependencies:
   firebase_ai: ^3.8.0
   firebase_vertexai: ^2.2.0
   firebase_messaging: ^16.1.2
+  sensors_plus: ^7.0.0
+  timezone: ^0.9.4
+  google_generative_ai: ^0.4.7
+  fl_chart: ^1.1.1
 
 
 dev_dependencies:
@@ -86,6 +90,8 @@ flutter:
 
   assets:
     - assets/models/mobilefacenet.tflite
+    - assets/models/fall_detection.tflite
+    - assets/models/scaler_params.json
 
 
 

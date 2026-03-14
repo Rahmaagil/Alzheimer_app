@@ -31,9 +31,9 @@ class _FaceCameraScreenState extends State<FaceCameraScreen> {
   @override
   void initState() {
     super.initState();
-    _initializeCamera();
     _initializeFaceDetection();
     FaceRecognitionService.initialize();
+    _initializeCamera();
   }
 
   void _initializeFaceDetection() {
@@ -49,46 +49,77 @@ class _FaceCameraScreenState extends State<FaceCameraScreen> {
   Future<void> _initializeCamera() async {
     try {
       final cameras = await availableCameras();
-      final frontCamera = cameras.firstWhere(
-            (camera) => camera.lensDirection == CameraLensDirection.front,
-      );
+
+      if (cameras.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text("Aucune camera trouvee sur cet appareil"),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+        return;
+      }
+
+      CameraDescription? frontCamera;
+      try {
+        frontCamera = cameras.firstWhere(
+              (camera) => camera.lensDirection == CameraLensDirection.front,
+        );
+      } catch (e) {
+        frontCamera = cameras.first;
+      }
 
       _controller = CameraController(
         frontCamera,
         ResolutionPreset.medium,
         enableAudio: false,
+        imageFormatGroup: ImageFormatGroup.yuv420,
       );
 
       await _controller!.initialize();
+      await Future.delayed(const Duration(milliseconds: 500));
 
-      _controller!.startImageStream((image) async {
+      await _controller!.startImageStream((CameraImage image) async {
         if (_isDetecting || _isProcessing) return;
+
         _isDetecting = true;
 
         try {
-          final inputImage = _convertCameraImage(image);
-          if (inputImage == null) {
-            _isDetecting = false;
-            return;
-          }
-
-          final faces = await _faceDetector.processImage(inputImage);
           _lastImage = image;
 
-          setState(() {
-            _faceDetected = faces.isNotEmpty;
-            _detectedFace = faces.isNotEmpty ? faces.first : null;
-          });
-        } catch (e) {
-          print("[Camera] Erreur detection: $e");
-        }
+          final inputImage = _convertCameraImage(image);
 
-        _isDetecting = false;
+          if (inputImage != null) {
+            final faces = await _faceDetector.processImage(inputImage);
+
+            if (mounted) {
+              setState(() {
+                _faceDetected = faces.isNotEmpty;
+                _detectedFace = faces.isNotEmpty ? faces.first : null;
+              });
+            }
+          }
+        } catch (e) {
+          // Erreur silencieuse
+        } finally {
+          _isDetecting = false;
+        }
       });
 
-      if (mounted) setState(() {});
+      if (mounted) {
+        setState(() {});
+      }
     } catch (e) {
-      print("[Camera] Erreur initialisation: $e");
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text("Erreur camera: $e"),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     }
   }
 
@@ -111,7 +142,6 @@ class _FaceCameraScreenState extends State<FaceCameraScreen> {
         ),
       );
     } catch (e) {
-      print("[Camera] Erreur conversion: $e");
       return null;
     }
   }
@@ -120,46 +150,49 @@ class _FaceCameraScreenState extends State<FaceCameraScreen> {
     try {
       final width = image.width;
       final height = image.height;
-
-      // CORRIGÉ : Syntaxe image 3.3.0
       final imgImage = img.Image(width, height);
+
+      final yPlane = image.planes[0].bytes;
+      final uPlane = image.planes[1].bytes;
+      final vPlane = image.planes[2].bytes;
 
       final uvRowStride = image.planes[1].bytesPerRow;
       final uvPixelStride = image.planes[1].bytesPerPixel ?? 1;
 
       for (int y = 0; y < height; y++) {
         for (int x = 0; x < width; x++) {
-          final uvIndex = uvPixelStride * (x ~/ 2) + uvRowStride * (y ~/ 2);
-          final index = y * width + x;
+          final yIndex = y * width + x;
+          final uvIndex = (y ~/ 2) * uvRowStride + (x ~/ 2) * uvPixelStride;
 
-          final yp = image.planes[0].bytes[index];
-          final up = image.planes[1].bytes[uvIndex];
-          final vp = image.planes[2].bytes[uvIndex];
+          final yValue = yPlane[yIndex];
+          final uValue = uPlane[uvIndex];
+          final vValue = vPlane[uvIndex];
 
-          int r = (yp + vp * 1436 / 1024 - 179).round().clamp(0, 255);
-          int g = (yp - up * 46549 / 131072 + 44 - vp * 93604 / 131072 + 91)
+          final r = (yValue + 1.402 * (vValue - 128)).round().clamp(0, 255);
+          final g = (yValue - 0.344136 * (uValue - 128) - 0.714136 * (vValue - 128))
               .round()
               .clamp(0, 255);
-          int b = (yp + up * 1814 / 1024 - 227).round().clamp(0, 255);
+          final b = (yValue + 1.772 * (uValue - 128)).round().clamp(0, 255);
 
-          // CORRIGÉ : setPixelRgba pour image 3.3.0
           imgImage.setPixelRgba(x, y, r, g, b, 255);
         }
       }
 
       return imgImage;
     } catch (e) {
-      print("[Camera] Erreur conversion image: $e");
       return null;
     }
   }
 
   Future<void> _captureFace() async {
-    if (_lastImage == null || _isProcessing) {
+    if (_isProcessing) return;
+
+    if (_lastImage == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text("Veuillez attendre la detection du visage"),
+          content: Text("Aucune image capturee. Reessayez."),
           duration: Duration(seconds: 2),
+          backgroundColor: Colors.orange,
         ),
       );
       return;
@@ -175,7 +208,6 @@ class _FaceCameraScreenState extends State<FaceCameraScreen> {
         return;
       }
 
-      // Si aucun visage détecté, utiliser l'image complète
       img.Image faceImage;
 
       if (_detectedFace != null) {
@@ -185,17 +217,23 @@ class _FaceCameraScreenState extends State<FaceCameraScreen> {
         final w = box.width.toInt().clamp(1, fullImage.width - x);
         final h = box.height.toInt().clamp(1, fullImage.height - y);
 
-        // CORRIGÉ : Syntaxe image 3.3.0
         faceImage = img.copyCrop(fullImage, x, y, w, h);
       } else {
-        // Utiliser image complète si pas de visage détecté
         faceImage = fullImage;
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Visage non detecte. Traitement en cours..."),
+            duration: Duration(seconds: 2),
+            backgroundColor: Colors.orange,
+          ),
+        );
       }
 
       final embedding = FaceRecognitionService.extractEmbedding(faceImage);
 
       if (embedding == null) {
-        _showError("Impossible d'extraire les caracteristiques");
+        _showError("Impossible d'extraire les caracteristiques du visage");
         setState(() => _isProcessing = false);
         return;
       }
@@ -212,7 +250,6 @@ class _FaceCameraScreenState extends State<FaceCameraScreen> {
         }
       }
     } catch (e) {
-      print("[Camera] Erreur capture: $e");
       _showError("Erreur: $e");
     }
 
@@ -372,25 +409,43 @@ class _FaceCameraScreenState extends State<FaceCameraScreen> {
         children: [
           Positioned.fill(child: CameraPreview(_controller!)),
 
-          if (_faceDetected)
-            Positioned(
-              top: 100,
-              left: 0,
-              right: 0,
-              child: Center(
-                child: Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Colors.green.withOpacity(0.9),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: const Text(
-                    "Visage detecte",
-                    style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
-                  ),
+          Positioned(
+            top: 100,
+            left: 0,
+            right: 0,
+            child: Center(
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                decoration: BoxDecoration(
+                  color: _faceDetected
+                      ? Colors.green.withOpacity(0.9)
+                      : Colors.orange.withOpacity(0.9),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      _faceDetected ? Icons.check_circle : Icons.warning,
+                      color: Colors.white,
+                      size: 24,
+                    ),
+                    const SizedBox(width: 10),
+                    Text(
+                      _faceDetected
+                          ? "Visage detecte - Cliquez pour capturer"
+                          : "Positionnez votre visage",
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),
+          ),
 
           Positioned(
             top: 40,

@@ -1,11 +1,13 @@
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/material.dart';
+import 'dart:async';
 
-// Handler pour notifications en arrière-plan
 @pragma('vm:entry-point')
-Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
-  print("[FCM Background] Message recu: ${message.notification?.title}");
+Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  debugPrint("[FCM Background] Message recu: ${message.notification?.title}");
 }
 
 class FCMService {
@@ -13,150 +15,261 @@ class FCMService {
   static final FlutterLocalNotificationsPlugin _localNotifications =
   FlutterLocalNotificationsPlugin();
 
-  // Initialiser FCM
+  static StreamSubscription? _firestoreSubscription;
+
   static Future<void> initialize() async {
-    // Demander permission (iOS)
-    NotificationSettings settings = await _messaging.requestPermission(
-      alert: true,
-      badge: true,
-      sound: true,
-      provisional: false,
-    );
+    debugPrint('[FCM] Initialisation complete...');
 
-    if (settings.authorizationStatus == AuthorizationStatus.authorized) {
-      print('[FCM] Permission accordee');
-    } else {
-      print('[FCM] Permission refusee');
-      return;
+    try {
+      final settings = await _messaging.requestPermission(
+        alert: true,
+        badge: true,
+        sound: true,
+        provisional: false,
+      );
+
+      if (settings.authorizationStatus != AuthorizationStatus.authorized) {
+        debugPrint('[FCM] Permissions refusees');
+        return;
+      }
+
+      debugPrint('[FCM] Permissions accordees');
+
+      await _initializeLocalNotifications();
+      await _createNotificationChannels();
+      await _setupMessageHandlers();
+      await _setupTokenManagement();
+
+      debugPrint('[FCM] Initialise avec succes');
+    } catch (e) {
+      debugPrint('[FCM] Erreur initialisation: $e');
     }
+  }
 
-    // Configuration notifications locales
-    const AndroidInitializationSettings androidSettings =
-    AndroidInitializationSettings('@mipmap/ic_launcher');
+  static Future<void> _initializeLocalNotifications() async {
+    const androidSettings = AndroidInitializationSettings('@mipmap/ic_launcher');
 
-    const DarwinInitializationSettings iosSettings =
-    DarwinInitializationSettings(
-      requestAlertPermission: true,
-      requestBadgePermission: true,
-      requestSoundPermission: true,
-    );
-
-    const InitializationSettings initSettings = InitializationSettings(
+    const initSettings = InitializationSettings(
       android: androidSettings,
-      iOS: iosSettings,
     );
 
     await _localNotifications.initialize(
       initSettings,
       onDidReceiveNotificationResponse: (details) {
-        print('[FCM] Notification cliquee: ${details.payload}');
+        debugPrint('[FCM] Notification cliquee: ${details.payload}');
       },
     );
 
-    // Créer canal Android
-    const AndroidNotificationChannel channel = AndroidNotificationChannel(
-      'alzhecare_channel',
-      'Alertes AlzheCare',
-      description: 'Notifications pour les alertes de zone',
-      importance: Importance.high,
-      enableVibration: true,
-      playSound: true,
-    );
+    final androidPlugin = _localNotifications
+        .resolvePlatformSpecificImplementation
+    <AndroidFlutterLocalNotificationsPlugin>();
 
-    // LIGNE CORRIGÉE ICI (ajout du <)
-    await _localNotifications
-        .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
-        ?.createNotificationChannel(channel);
-
-    // Handler messages en arrière-plan
-    FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
-
-    // Handler messages quand app ouverte
-    FirebaseMessaging.onMessage.listen((RemoteMessage message) {
-      print('[FCM Foreground] Message recu: ${message.notification?.title}');
-      _showLocalNotification(message);
-    });
-
-    // Handler quand utilisateur clique sur notification
-    FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
-      print('[FCM] App ouverte via notification');
-    });
-  }
-
-  // Récupérer et sauvegarder le token FCM
-  static Future<void> saveTokenForUser(String uid) async {
-    try {
-      String? token = await _messaging.getToken();
-
-      if (token != null) {
-        await FirebaseFirestore.instance
-            .collection('users')
-            .doc(uid)
-            .update({
-          'fcmToken': token,
-          'fcmTokenUpdatedAt': FieldValue.serverTimestamp(),
-        });
-
-        print('[FCM] Token sauvegarde: $token');
-      }
-
-      // Écouter les changements de token
-      _messaging.onTokenRefresh.listen((newToken) {
-        FirebaseFirestore.instance
-            .collection('users')
-            .doc(uid)
-            .update({
-          'fcmToken': newToken,
-          'fcmTokenUpdatedAt': FieldValue.serverTimestamp(),
-        });
-      });
-    } catch (e) {
-      print('[FCM] Erreur sauvegarde token: $e');
+    if (androidPlugin != null) {
+      await androidPlugin.requestNotificationsPermission();
     }
   }
 
-  // Afficher notification locale
-  static Future<void> _showLocalNotification(RemoteMessage message) async {
-    const AndroidNotificationDetails androidDetails =
-    AndroidNotificationDetails(
-      'alzhecare_channel',
-      'Alertes AlzheCare',
-      channelDescription: 'Notifications pour les alertes de zone',
+  static Future<void> _createNotificationChannels() async {
+    final androidPlugin = _localNotifications
+        .resolvePlatformSpecificImplementation
+    <AndroidFlutterLocalNotificationsPlugin>();
+
+    if (androidPlugin == null) return;
+
+    const alertsChannel = AndroidNotificationChannel(
+      'alzhecare_alerts',
+      'Alertes Urgentes',
+      description: 'Alertes SOS, chutes et sorties de zone',
+      importance: Importance.max,
+      enableVibration: true,
+      playSound: true,
+      enableLights: true,
+      ledColor: Color(0xFFFF0000),
+    );
+
+    const remindersChannel = AndroidNotificationChannel(
+      'alzhecare_reminders',
+      'Rappels',
+      description: 'Rappels medicaments et routines',
       importance: Importance.high,
-      priority: Priority.high,
       enableVibration: true,
       playSound: true,
     );
 
-    const DarwinNotificationDetails iosDetails = DarwinNotificationDetails(
-      presentAlert: true,
-      presentBadge: true,
-      presentSound: true,
+    const routineChannel = AndroidNotificationChannel(
+      'alzhecare_routine',
+      'Routine quotidienne',
+      description: 'Notifications de routine',
+      importance: Importance.defaultImportance,
+      playSound: true,
     );
 
-    const NotificationDetails details = NotificationDetails(
-      android: androidDetails,
-      iOS: iosDetails,
+    await androidPlugin.createNotificationChannel(alertsChannel);
+    await androidPlugin.createNotificationChannel(remindersChannel);
+    await androidPlugin.createNotificationChannel(routineChannel);
+
+    debugPrint('[FCM] Canaux crees');
+  }
+
+  static Future<void> _setupMessageHandlers() async {
+    FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
+
+    FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+      debugPrint('[FCM Foreground] Message: ${message.notification?.title}');
+      _showLocalNotification(message);
+    });
+
+    FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
+      debugPrint('[FCM] App ouverte via notification');
+    });
+
+    final initialMessage = await _messaging.getInitialMessage();
+    if (initialMessage != null) {
+      debugPrint('[FCM] App lancee via notification');
+    }
+  }
+
+  static Future<void> _setupTokenManagement() async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) {
+        debugPrint('[FCM] Pas d\'utilisateur connecte');
+        return;
+      }
+
+      final token = await _messaging.getToken();
+      if (token != null) {
+        await _saveToken(user.uid, token);
+      }
+
+      _messaging.onTokenRefresh.listen((newToken) {
+        final currentUser = FirebaseAuth.instance.currentUser;
+        if (currentUser != null) {
+          _saveToken(currentUser.uid, newToken);
+        }
+      });
+    } catch (e) {
+      debugPrint('[FCM] Erreur setup token: $e');
+    }
+  }
+
+  static Future<void> _saveToken(String uid, String token) async {
+    try {
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(uid)
+          .update({
+        'fcmToken': token,
+        'fcmTokenUpdatedAt': FieldValue.serverTimestamp(),
+      });
+
+      debugPrint('[FCM] Token sauvegarde');
+    } catch (e) {
+      debugPrint('[FCM] Erreur sauvegarde token: $e');
+    }
+  }
+
+  static Future<void> _showLocalNotification(RemoteMessage message) async {
+    final notification = message.notification;
+    if (notification == null) return;
+
+    final alertType = message.data['type']?.toString() ?? '';
+    final channelId = _getChannelIdForType(alertType);
+    final importance = _getImportanceForType(alertType);
+
+    final androidDetails = AndroidNotificationDetails(
+      channelId,
+      _getChannelNameForType(alertType),
+      channelDescription: _getChannelDescForType(alertType),
+      importance: importance,
+      priority: importance == Importance.max ? Priority.max : Priority.high,
+      enableVibration: true,
+      playSound: true,
+      icon: '@mipmap/ic_launcher',
+      color: const Color(0xFF4A90E2),
+      styleInformation: BigTextStyleInformation(
+        notification.body ?? '',
+        contentTitle: notification.title,
+      ),
     );
+
+    final details = NotificationDetails(android: androidDetails);
 
     await _localNotifications.show(
       message.hashCode,
-      message.notification?.title ?? 'AlzheCare',
-      message.notification?.body ?? 'Nouvelle notification',
+      notification.title ?? 'AlzheCare',
+      notification.body ?? 'Nouvelle notification',
       details,
       payload: message.data.toString(),
     );
   }
 
-  // Envoyer notification au suiveur
+  static Future<void> startListeningFirestoreAlerts(String caregiverUid) async {
+    debugPrint('[FCM] Ecoute Firestore pour: $caregiverUid');
+
+    await _firestoreSubscription?.cancel();
+
+    _firestoreSubscription = FirebaseFirestore.instance
+        .collection('notifications')
+        .where('caregiverId', isEqualTo: caregiverUid)  // CORRECTION ICI
+        .where('status', isEqualTo: 'pending')
+        .orderBy('timestamp', descending: true)  // CORRECTION ICI (etait 'createdAt')
+        .snapshots()
+        .listen((snapshot) async {
+      for (var change in snapshot.docChanges) {
+        if (change.type == DocumentChangeType.added) {
+          final data = change.doc.data() as Map<String, dynamic>?;
+          if (data != null) {
+            await _showFirestoreNotification(change.doc.id, data);
+          }
+        }
+      }
+    });
+  }
+
+  static Future<void> stopListeningFirestoreAlerts() async {
+    await _firestoreSubscription?.cancel();
+    _firestoreSubscription = null;
+  }
+
+  static Future<void> _showFirestoreNotification(
+      String notifId, Map<String, dynamic> notif) async {
+    final notification = notif['notification'] as Map<String, dynamic>?;
+    final title = notification?['title'] ?? 'AlzheCare';
+    final body = notification?['body'] ?? 'Nouvelle alerte';
+
+    await _localNotifications.show(
+      notifId.hashCode,
+      title,
+      body,
+      const NotificationDetails(
+        android: AndroidNotificationDetails(
+          'alzhecare_alerts',
+          'Alertes Urgentes',
+          importance: Importance.max,
+          priority: Priority.high,
+          icon: '@mipmap/ic_launcher',
+        ),
+      ),
+    );
+
+    await FirebaseFirestore.instance
+        .collection('notifications')
+        .doc(notifId)
+        .update({
+      'status': 'delivered',
+      'deliveredAt': FieldValue.serverTimestamp(),
+    });
+  }
+
   static Future<void> sendNotificationToCaregiver({
     required String patientUid,
     required String title,
     required String body,
+    String? type,
     Map<String, dynamic>? data,
   }) async {
     try {
-      // Récupérer l'UID du suiveur
       final patientDoc = await FirebaseFirestore.instance
           .collection('users')
           .doc(patientUid)
@@ -165,11 +278,10 @@ class FCMService {
       final caregiverUid = patientDoc.data()?['linkedCaregiver'] as String?;
 
       if (caregiverUid == null) {
-        print('[FCM] Aucun suiveur lie');
+        debugPrint('[FCM] Aucun caregiver lie');
         return;
       }
 
-      // Récupérer le token FCM du suiveur
       final caregiverDoc = await FirebaseFirestore.instance
           .collection('users')
           .doc(caregiverUid)
@@ -178,32 +290,172 @@ class FCMService {
       final fcmToken = caregiverDoc.data()?['fcmToken'] as String?;
 
       if (fcmToken == null) {
-        print('[FCM] Suiveur sans token FCM');
+        debugPrint('[FCM] Caregiver sans token FCM');
         return;
       }
 
-      // Créer une notification dans Firestore
-      // (Sera traitée par Cloud Functions ou service backend)
-      // Créer une notification dans Firestore
       await FirebaseFirestore.instance
           .collection('notifications')
           .add({
-        'caregiverUid': caregiverUid,  // AJOUTER pour le query
+        'caregiverUid': caregiverUid,
         'to': fcmToken,
         'notification': {
           'title': title,
           'body': body,
         },
-        'data': data ?? {},
+        'data': {
+          ...?data,
+          'type': type ?? '',
+          'patientUid': patientUid,
+        },
         'priority': 'high',
         'createdAt': FieldValue.serverTimestamp(),
         'status': 'pending',
       });
 
-      print('[FCM] Notification creee pour le suiveur');
-
+      debugPrint('[FCM] Notification creee pour caregiver');
     } catch (e) {
-      print('[FCM] Erreur envoi notification: $e');
+      debugPrint('[FCM] Erreur: $e');
+    }
+  }
+
+  static Future<void> sendSOSAlert({
+    required String patientUid,
+    double? latitude,
+    double? longitude,
+  }) async {
+    await sendNotificationToCaregiver(
+      patientUid: patientUid,
+      title: 'ALERTE SOS',
+      body: 'Le patient a declenche une alerte SOS',
+      type: 'sos',
+      data: {
+        'latitude': latitude,
+        'longitude': longitude,
+      },
+    );
+  }
+
+  static Future<void> sendFallAlert({
+    required String patientUid,
+    double? latitude,
+    double? longitude,
+  }) async {
+    await sendNotificationToCaregiver(
+      patientUid: patientUid,
+      title: 'Chute detectee',
+      body: 'Une chute a ete detectee',
+      type: 'fall',
+      data: {
+        'latitude': latitude,
+        'longitude': longitude,
+      },
+    );
+  }
+
+  static Future<void> sendGeofenceAlert({
+    required String patientUid,
+    required int distance,
+    double? latitude,
+    double? longitude,
+  }) async {
+    await sendNotificationToCaregiver(
+      patientUid: patientUid,
+      title: 'Sortie de zone',
+      body: 'Le patient est sorti de la zone securisee ($distance m)',
+      type: 'geofence',
+      data: {
+        'distance': distance,
+        'latitude': latitude,
+        'longitude': longitude,
+      },
+    );
+  }
+
+  static Future<void> showGeofenceAlert({required int distance}) async {
+    await _localNotifications.show(
+      1,
+      'Alerte de securite',
+      'Le patient est sorti de la zone securisee ($distance m)',
+      const NotificationDetails(
+        android: AndroidNotificationDetails(
+          'alzhecare_alerts',
+          'Alertes Urgentes',
+          importance: Importance.max,
+          priority: Priority.high,
+          icon: '@mipmap/ic_launcher',
+        ),
+      ),
+    );
+  }
+
+  static Future<void> deleteToken() async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user != null) {
+        await FirebaseFirestore.instance
+            .collection('users')
+            .doc(user.uid)
+            .update({'fcmToken': FieldValue.delete()});
+      }
+
+      await _messaging.deleteToken();
+      debugPrint('[FCM] Token supprime');
+    } catch (e) {
+      debugPrint('[FCM] Erreur suppression: $e');
+    }
+  }
+
+  static String _getChannelIdForType(String type) {
+    switch (type.toLowerCase()) {
+      case 'sos':
+      case 'fall':
+      case 'geofence':
+        return 'alzhecare_alerts';
+      case 'reminder':
+      case 'medication':
+        return 'alzhecare_reminders';
+      case 'routine':
+        return 'alzhecare_routine';
+      default:
+        return 'alzhecare_alerts';
+    }
+  }
+
+  static String _getChannelNameForType(String type) {
+    switch (type.toLowerCase()) {
+      case 'reminder':
+      case 'medication':
+        return 'Rappels';
+      case 'routine':
+        return 'Routine quotidienne';
+      default:
+        return 'Alertes Urgentes';
+    }
+  }
+
+  static String _getChannelDescForType(String type) {
+    switch (type.toLowerCase()) {
+      case 'reminder':
+      case 'medication':
+        return 'Rappels medicaments et routines';
+      case 'routine':
+        return 'Notifications de routine';
+      default:
+        return 'Alertes SOS, chutes et sorties de zone';
+    }
+  }
+
+  static Importance _getImportanceForType(String type) {
+    switch (type.toLowerCase()) {
+      case 'sos':
+      case 'fall':
+        return Importance.max;
+      case 'geofence':
+      case 'reminder':
+        return Importance.high;
+      default:
+        return Importance.defaultImportance;
     }
   }
 }

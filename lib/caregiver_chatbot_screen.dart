@@ -24,7 +24,7 @@ class _CaregiverChatbotScreenState extends State<CaregiverChatbotScreen> {
   void _addWelcomeMessage() {
     setState(() {
       _messages.add(ChatMessage(
-        text: "Bonjour ! Je suis ton assistant virtuel AlzheCare. Je suis là pour t'accompagner dans ton rôle d'aidant. Comment puis-je t'aider aujourd'hui ? 💙",
+        text: "Bonjour ! Je suis ton assistant virtuel AlzheCare. Je suis là pour t'accompagner dans ton rôle d'aidant. Comment puis-je t'aider aujourd'hui ? ",
         isUser: false,
         timestamp: DateTime.now(),
       ));
