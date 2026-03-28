@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:fl_chart/fl_chart.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'dart:async';
 
 class CaregiverAlertsTab extends StatefulWidget {
@@ -14,15 +15,27 @@ class CaregiverAlertsTab extends StatefulWidget {
 
 class _CaregiverAlertsTabState extends State<CaregiverAlertsTab> {
   String _filterType = 'all';
-  String? _patientUid;
+  List<String> _linkedPatientIds = [];
   StreamSubscription? _alertsSubscription;
   bool _showStats = false;
+  bool _isLoadingPatients = true;
+
+  final FlutterLocalNotificationsPlugin _localNotifications =
+  FlutterLocalNotificationsPlugin();
 
   @override
   void initState() {
     super.initState();
-    _initPatientUid();
-    _setupRealtimeListener();
+
+    // VERSION DEBUG: Initialisation minimale
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        setState(() {
+          _isLoadingPatients = false;
+          _linkedPatientIds = [];
+        });
+      }
+    });
   }
 
   @override
@@ -31,51 +44,57 @@ class _CaregiverAlertsTabState extends State<CaregiverAlertsTab> {
     super.dispose();
   }
 
-  Future<void> _initPatientUid() async {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return;
+  Future<void> _initializeLocalNotifications() async {
+    const androidSettings = AndroidInitializationSettings('@mipmap/ic_launcher');
+    const settings = InitializationSettings(android: androidSettings);
 
-    try {
-      final doc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .get();
+    await _localNotifications.initialize(
+      settings,
+      onDidReceiveNotificationResponse: (details) {
+        debugPrint('[Notifications] Tap sur notification: ${details.payload}');
+      },
+    );
 
-      String? patientUid = doc.data()?['linkedPatient'];
+    final androidPlugin = _localNotifications
+        .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
 
-      if (patientUid == null) {
-        final p = await FirebaseFirestore.instance
-            .collection('users')
-            .where('role', isEqualTo: 'patient')
-            .limit(1)
-            .get();
-        if (p.docs.isNotEmpty) patientUid = p.docs.first.id;
-      }
-
-      if (mounted) {
-        setState(() {
-          _patientUid = patientUid;
-        });
-      }
-
-      // Marquer les alertes comme vues
-      if (patientUid != null) {
-        Future.delayed(const Duration(seconds: 2), () {
-          _markAllAlertsAsSeen();
-        });
-      }
-    } catch (e) {
-      debugPrint('Error init patient UID: $e');
+    if (androidPlugin != null) {
+      await androidPlugin.requestNotificationsPermission();
     }
+  }
+
+  // VERSION SIMPLIFIEE pour debug
+  Future<void> _loadLinkedPatients() async {
+    debugPrint('[Alerts] Début chargement...');
+
+    setState(() => _isLoadingPatients = true);
+
+    final user = FirebaseAuth.instance.currentUser;
+
+    if (user == null) {
+      debugPrint('[Alerts] Pas de user connecté');
+      setState(() => _isLoadingPatients = false);
+      return;
+    }
+
+    debugPrint('[Alerts] User UID: ${user.uid}');
+
+    // TEMPORAIRE: Pas de filtre patients
+    setState(() {
+      _linkedPatientIds = []; // Vide pour l'instant
+      _isLoadingPatients = false;
+    });
+
+    debugPrint('[Alerts] Chargement terminé');
+    _setupRealtimeListener();
   }
 
   void _setupRealtimeListener() {
     _alertsSubscription?.cancel();
 
     final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return;
+    if (user == null || _linkedPatientIds.isEmpty) return;
 
-    // Ecouter les nouvelles alertes dans notifications
     _alertsSubscription = FirebaseFirestore.instance
         .collection('notifications')
         .where('caregiverId', isEqualTo: user.uid)
@@ -87,17 +106,52 @@ class _CaregiverAlertsTabState extends State<CaregiverAlertsTab> {
         if (change.type == DocumentChangeType.added) {
           final data = change.doc.data() as Map<String, dynamic>?;
           if (data != null) {
-            _showNotification(data);
+            // Vérifier que l'alerte vient d'un patient lié
+            final patientId = data['patientId'] as String?;
+            if (patientId != null && _linkedPatientIds.contains(patientId)) {
+              _showNotification(data);
+            }
           }
         }
       }
     });
   }
 
-  void _showNotification(Map<String, dynamic> alertData) {
+  Future<void> _showNotification(Map<String, dynamic> alertData) async {
     final type = alertData['type'] ?? '';
     final isSOS = type.toLowerCase() == 'sos';
     final isFall = type.toLowerCase() == 'fall' || type.toLowerCase().contains('chute');
+
+    try {
+      final androidDetails = AndroidNotificationDetails(
+        'alzhecare_alerts',
+        'Alertes Urgentes',
+        channelDescription: 'Alertes SOS, chutes et sorties de zone',
+        importance: Importance.max,
+        priority: Priority.high,
+        enableVibration: true,
+        playSound: true,
+        enableLights: true,
+        ledColor: const Color(0xFFFF0000),
+        icon: '@mipmap/ic_launcher',
+        styleInformation: BigTextStyleInformation(
+          alertData['message'] ?? '',
+          contentTitle: alertData['title'] ?? 'AlzheCare',
+        ),
+      );
+
+      final details = NotificationDetails(android: androidDetails);
+
+      await _localNotifications.show(
+        DateTime.now().millisecondsSinceEpoch ~/ 1000,
+        alertData['title'] ?? 'AlzheCare',
+        alertData['message'] ?? 'Nouvelle alerte',
+        details,
+        payload: type,
+      );
+    } catch (e) {
+      debugPrint('[Notifications] Erreur notification systeme: $e');
+    }
 
     if (!mounted) return;
 
@@ -156,6 +210,7 @@ class _CaregiverAlertsTabState extends State<CaregiverAlertsTab> {
     );
   }
 
+  // MODIFIE: Marquer comme "seen" au lieu de "pending"
   Future<void> _markAllAlertsAsSeen() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
@@ -180,6 +235,7 @@ class _CaregiverAlertsTabState extends State<CaregiverAlertsTab> {
       }
 
       await batch.commit();
+      debugPrint('[Alerts] ${snapshot.docs.length} alertes marquées comme vues');
     } catch (e) {
       debugPrint('Error marking alerts as seen: $e');
     }
@@ -299,23 +355,70 @@ class _CaregiverAlertsTabState extends State<CaregiverAlertsTab> {
           ),
         ),
         child: SafeArea(
-          child: Column(
+          child: _isLoadingPatients
+              ? const Center(
+            child: CircularProgressIndicator(
+              valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF4A90E2)),
+            ),
+          )
+              : _linkedPatientIds.isEmpty
+              ? _buildNoPatientView()
+              : Column(
             children: [
-              // Header personnalisé
               _buildHeader(),
-
-              // Toggle Alertes/Statistiques
               _buildToggleButtons(),
-
               const SizedBox(height: 16),
-
-              // Contenu principal
               Expanded(
                 child: _showStats ? _buildStatsView() : _buildAlertsView(),
               ),
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  // NOUVEAU: Message si aucun patient lié
+  Widget _buildNoPatientView() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Container(
+            width: 120,
+            height: 120,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: const Color(0xFF4A90E2).withOpacity(0.1),
+            ),
+            child: const Icon(
+              Icons.person_add_outlined,
+              size: 60,
+              color: Color(0xFF4A90E2),
+            ),
+          ),
+          const SizedBox(height: 24),
+          const Text(
+            'Aucun patient lié',
+            style: TextStyle(
+              fontSize: 22,
+              fontWeight: FontWeight.bold,
+              color: Color(0xFF2E5AAC),
+            ),
+          ),
+          const SizedBox(height: 12),
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 40),
+            child: Text(
+              'Générez un code d\'invitation dans votre profil pour lier un patient',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 15,
+                color: Colors.black54,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -327,7 +430,6 @@ class _CaregiverAlertsTabState extends State<CaregiverAlertsTab> {
       padding: const EdgeInsets.all(20),
       child: Row(
         children: [
-          // Badge nombre alertes
           if (user != null)
             StreamBuilder<QuerySnapshot>(
               stream: FirebaseFirestore.instance
@@ -358,6 +460,7 @@ class _CaregiverAlertsTabState extends State<CaregiverAlertsTab> {
                     alignment: Alignment.center,
                     children: [
                       const Icon(Icons.notifications, color: Colors.white, size: 28),
+                      // BADGE ROUGE (disparaît si count == 0)
                       if (count > 0)
                         Positioned(
                           top: 8,
@@ -388,7 +491,6 @@ class _CaregiverAlertsTabState extends State<CaregiverAlertsTab> {
 
           const SizedBox(width: 16),
 
-          // Titre
           const Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -413,10 +515,9 @@ class _CaregiverAlertsTabState extends State<CaregiverAlertsTab> {
             ),
           ),
 
-          // Bouton refresh
           GestureDetector(
             onTap: () {
-              setState(() {});
+              _loadLinkedPatients();
             },
             child: Container(
               width: 50,
@@ -547,7 +648,6 @@ class _CaregiverAlertsTabState extends State<CaregiverAlertsTab> {
 
     return Column(
       children: [
-        // Filtres
         SingleChildScrollView(
           scrollDirection: Axis.horizontal,
           padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -566,7 +666,6 @@ class _CaregiverAlertsTabState extends State<CaregiverAlertsTab> {
 
         const SizedBox(height: 20),
 
-        // Liste alertes
         Expanded(
           child: user == null
               ? const Center(
@@ -617,6 +716,7 @@ class _CaregiverAlertsTabState extends State<CaregiverAlertsTab> {
 
               final docs = snapshot.data?.docs ?? [];
 
+              // TEMPORAIRE: Pas de filtre patients pour debug
               var filtered = docs.where((doc) {
                 final data = doc.data() as Map<String, dynamic>;
                 final type = (data['type'] ?? '').toString().toLowerCase();
@@ -680,7 +780,7 @@ class _CaregiverAlertsTabState extends State<CaregiverAlertsTab> {
               return RefreshIndicator(
                 color: const Color(0xFF4A90E2),
                 onRefresh: () async {
-                  await Future.delayed(const Duration(milliseconds: 500));
+                  await _loadLinkedPatients();
                 },
                 child: ListView.builder(
                   padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -858,7 +958,6 @@ class _CaregiverAlertsTabState extends State<CaregiverAlertsTab> {
           borderRadius: BorderRadius.circular(20),
           child: Column(
             children: [
-              // Barre de couleur en haut
               Container(
                 height: 6,
                 decoration: BoxDecoration(
@@ -872,7 +971,6 @@ class _CaregiverAlertsTabState extends State<CaregiverAlertsTab> {
                   children: [
                     Row(
                       children: [
-                        // Icône avec gradient
                         Container(
                           width: 56,
                           height: 56,
@@ -892,7 +990,6 @@ class _CaregiverAlertsTabState extends State<CaregiverAlertsTab> {
 
                         const SizedBox(width: 16),
 
-                        // Texte
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
@@ -955,7 +1052,6 @@ class _CaregiverAlertsTabState extends State<CaregiverAlertsTab> {
 
                     const SizedBox(height: 16),
 
-                    // Boutons d'action
                     Row(
                       children: [
                         if (hasPos)
@@ -1072,9 +1168,11 @@ class _CaregiverAlertsTabState extends State<CaregiverAlertsTab> {
           );
         }
 
-        final alerts = snapshot.data!.docs;
+        final allAlerts = snapshot.data!.docs;
 
-        // Calculer stats
+        // TEMPORAIRE: Pas de filtre pour debug
+        final alerts = allAlerts;
+
         final now = DateTime.now();
         final last7Days = now.subtract(const Duration(days: 7));
         final last30Days = now.subtract(const Duration(days: 30));
@@ -1091,7 +1189,6 @@ class _CaregiverAlertsTabState extends State<CaregiverAlertsTab> {
           return ts.toDate().isAfter(last30Days);
         }).toList();
 
-        // Compter par type
         final sosCount = alerts.where((doc) {
           final type = ((doc.data() as Map<String, dynamic>)['type'] ?? '').toString().toLowerCase();
           return type == 'sos';
@@ -1107,7 +1204,6 @@ class _CaregiverAlertsTabState extends State<CaregiverAlertsTab> {
           return type.contains('chute') || type.contains('fall');
         }).length;
 
-        // Données pour le graphique par jour (7 derniers jours)
         final chartData = <String, int>{};
         for (int i = 6; i >= 0; i--) {
           final date = now.subtract(Duration(days: i));
@@ -1129,7 +1225,6 @@ class _CaregiverAlertsTabState extends State<CaregiverAlertsTab> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Cartes de stats
               Row(
                 children: [
                   Expanded(
@@ -1178,7 +1273,6 @@ class _CaregiverAlertsTabState extends State<CaregiverAlertsTab> {
 
               const SizedBox(height: 24),
 
-              // Graphique
               Container(
                 padding: const EdgeInsets.all(20),
                 decoration: BoxDecoration(
@@ -1273,7 +1367,6 @@ class _CaregiverAlertsTabState extends State<CaregiverAlertsTab> {
 
               const SizedBox(height: 24),
 
-              // Répartition par type
               Container(
                 padding: const EdgeInsets.all(20),
                 decoration: BoxDecoration(

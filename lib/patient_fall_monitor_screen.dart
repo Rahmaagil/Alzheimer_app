@@ -94,13 +94,17 @@ class _PatientFallMonitorScreenState extends State<PatientFallMonitorScreen> {
           .doc(user.uid)
           .get();
 
-      final linkedCaregiver = userDoc.data()?['linkedCaregiver'];
+      // NOUVEAU: Liste
+      final linkedCaregivers = List<String>.from(
+          userDoc.data()?['linkedCaregivers'] ?? []
+      );
 
-      if (linkedCaregiver == null) {
-        debugPrint('[PatientFallMonitor] Pas de proche lie');
+      if (linkedCaregivers.isEmpty) {
+        debugPrint('[PatientFallMonitor] Aucun proche lié');
         return;
       }
 
+      // Récupérer position GPS
       GeoPoint? location;
       final locationDoc = await FirebaseFirestore.instance
           .collection('users')
@@ -114,24 +118,27 @@ class _PatientFallMonitorScreenState extends State<PatientFallMonitorScreen> {
         location = locationDoc.docs.first.data()['location'] as GeoPoint?;
       }
 
-      await FirebaseFirestore.instance
-          .collection('notifications')
-          .add({
-        'caregiverId': linkedCaregiver,
-        'patientId': user.uid,
-        'type': 'fall',
-        'title': 'Alerte Chute Detectee',
-        'message': 'Une chute a ete detectee avec ${(confidence * 100).toStringAsFixed(0)}% de confiance',
-        'location': location,
-        'timestamp': FieldValue.serverTimestamp(),
-        'status': 'pending',
-        'confidence': confidence,
-        'confirmed': shouldSendAlert == true ? 'patient' : 'auto',
-        'latitude': location?.latitude,
-        'longitude': location?.longitude,
-      });
+      // ENVOYER A TOUS LES SUIVEURS
+      for (final caregiverId in linkedCaregivers) {
+        await FirebaseFirestore.instance
+            .collection('notifications')
+            .add({
+          'caregiverId': caregiverId,
+          'patientId': user.uid,
+          'type': 'fall',
+          'title': 'Alerte Chute Detectee',
+          'message': 'Une chute a ete detectee avec ${(confidence * 100).toStringAsFixed(0)}% de confiance',
+          'location': location,
+          'timestamp': FieldValue.serverTimestamp(),
+          'status': 'pending',
+          'confidence': confidence,
+          'confirmed': shouldSendAlert == true ? 'patient' : 'auto',
+          'latitude': location?.latitude,
+          'longitude': location?.longitude,
+        });
+      }
 
-      debugPrint('[PatientFallMonitor] Alerte envoyee au proche');
+      debugPrint('[PatientFallMonitor] Alerte envoyée à ${linkedCaregivers.length} proche(s)');
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -141,7 +148,7 @@ class _PatientFallMonitorScreenState extends State<PatientFallMonitorScreen> {
                 Icon(Icons.warning_amber_rounded, color: Colors.white),
                 SizedBox(width: 12),
                 Expanded(
-                  child: Text('Alerte chute envoyee a votre proche'),
+                  child: Text('Alerte chute envoyee a ${linkedCaregivers.length} proche(s)'),
                 ),
               ],
             ),
@@ -382,7 +389,7 @@ class _FallConfirmationDialogState extends State<_FallConfirmationDialog> {
 
       if (_secondsRemaining <= 0) {
         timer.cancel();
-        Navigator.pop(context, true); // Timeout → Envoyer alerte
+        Navigator.pop(context, true); // Timeout -> Envoyer alerte
       }
     });
   }

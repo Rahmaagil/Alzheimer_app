@@ -1,11 +1,13 @@
 import 'package:alzhecare/fcm_service.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'sign_in_screen.dart';
 import 'caregiver_settings_screen.dart';
 import 'user_session_manager.dart';
 import 'geofencing_service.dart';
+import 'patient_caregiver_link_service.dart';
 
 class CaregiverProfileTab extends StatefulWidget {
   const CaregiverProfileTab({super.key});
@@ -16,7 +18,7 @@ class CaregiverProfileTab extends StatefulWidget {
 
 class _CaregiverProfileTabState extends State<CaregiverProfileTab> {
   Map<String, dynamic>? _patientData;
-  String? _patientUid;
+  List<String> _linkedPatientUids = [];
   bool _isLoading = true;
 
   final _nameCtrl = TextEditingController();
@@ -31,6 +33,7 @@ class _CaregiverProfileTabState extends State<CaregiverProfileTab> {
 
   String _diseaseStage = 'Léger';
   final List<String> _stages = ['Léger', 'Modéré', 'Avancé'];
+  String? _currentPatientUid;
 
   @override
   void initState() {
@@ -65,9 +68,11 @@ class _CaregiverProfileTabState extends State<CaregiverProfileTab> {
           .doc(user.uid)
           .get();
 
-      final patientUid = suiveurDoc.data()?['linkedPatient'] as String?;
+      final linkedPatients = List<String>.from(
+          suiveurDoc.data()?['linkedPatients'] ?? []
+      );
 
-      if (patientUid == null) {
+      if (linkedPatients.isEmpty) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
@@ -76,12 +81,28 @@ class _CaregiverProfileTabState extends State<CaregiverProfileTab> {
             ),
           );
         }
-        setState(() => _isLoading = false);
+        setState(() {
+          _linkedPatientUids = [];
+          _isLoading = false;
+        });
         return;
       }
 
-      _patientUid = patientUid;
+      setState(() {
+        _linkedPatientUids = linkedPatients;
+        _currentPatientUid = linkedPatients.first;
+      });
 
+      await _loadPatientData(linkedPatients.first);
+
+    } catch (e) {
+      debugPrint("Erreur: $e");
+      setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _loadPatientData(String patientUid) async {
+    try {
       final patDoc = await FirebaseFirestore.instance
           .collection('users')
           .doc(patientUid)
@@ -103,6 +124,7 @@ class _CaregiverProfileTabState extends State<CaregiverProfileTab> {
       final data = patDoc.data();
 
       setState(() {
+        _currentPatientUid = patientUid;
         _patientData = data;
         _nameCtrl.text = data?['name'] ?? '';
         _ageCtrl.text = data?['age']?.toString() ?? '';
@@ -122,13 +144,192 @@ class _CaregiverProfileTabState extends State<CaregiverProfileTab> {
     }
   }
 
+  Future<void> _generateInviteCode() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const Center(
+        child: CircularProgressIndicator(),
+      ),
+    );
+
+    try {
+      final code = await PatientCaregiverLinkService.createInviteCode(
+        caregiverUid: user.uid,
+        expiryHours: 24,
+      );
+
+      if (mounted) Navigator.pop(context);
+
+      if (code == null) {
+        throw Exception('Erreur génération code');
+      }
+
+      _showCodeDialog(code);
+
+    } catch (e) {
+      if (mounted) Navigator.pop(context);
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Erreur: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  void _showCodeDialog(String code) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+        ),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  colors: [Color(0xFF6EC6FF), Color(0xFF4A90E2)],
+                ),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: const Icon(
+                Icons.qr_code_2,
+                color: Colors.white,
+                size: 24,
+              ),
+            ),
+            const SizedBox(width: 12),
+            const Expanded(
+              child: Text(
+                'Code d\'invitation',
+                style: TextStyle(fontSize: 20),
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              'Partagez ce code avec votre proche',
+              style: TextStyle(fontSize: 14, color: Colors.black87),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 20),
+            Container(
+              padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  colors: [Color(0xFF6EC6FF), Color(0xFF4A90E2)],
+                ),
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: [
+                  BoxShadow(
+                    color: const Color(0xFF4A90E2).withOpacity(0.3),
+                    blurRadius: 12,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: Text(
+                code,
+                style: const TextStyle(
+                  fontSize: 40,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                  letterSpacing: 10,
+                ),
+                textAlign: TextAlign.center,
+              ),
+            ),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+              decoration: BoxDecoration(
+                color: Colors.orange.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.access_time,
+                    size: 16,
+                    color: Colors.orange,
+                  ),
+                  SizedBox(width: 6),
+                  Text(
+                    'Expire dans 24h',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: Colors.orange,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton.icon(
+            onPressed: () {
+              Clipboard.setData(ClipboardData(text: code));
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: const Row(
+                    children: [
+                      Icon(Icons.check_circle, color: Colors.white),
+                      SizedBox(width: 8),
+                      Text('Code copié'),
+                    ],
+                  ),
+                  backgroundColor: Colors.green,
+                  behavior: SnackBarBehavior.floating,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  duration: const Duration(seconds: 2),
+                ),
+              );
+            },
+            icon: const Icon(Icons.copy),
+            label: const Text('Copier'),
+          ),
+          Container(
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                colors: [Color(0xFF6EC6FF), Color(0xFF4A90E2)],
+              ),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text(
+                'OK',
+                style: TextStyle(color: Colors.white),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _savePatientInfo() async {
-    if (_patientUid == null) return;
+    if (_currentPatientUid == null) return;
 
     try {
       await FirebaseFirestore.instance
           .collection('users')
-          .doc(_patientUid)
+          .doc(_currentPatientUid)
           .update({
         'name': _nameCtrl.text.trim(),
         'age': int.tryParse(_ageCtrl.text.trim()),
@@ -308,6 +509,7 @@ class _CaregiverProfileTabState extends State<CaregiverProfileTab> {
       ),
     );
   }
+
   Widget _field(
       TextEditingController ctrl,
       String hint,
@@ -376,7 +578,7 @@ class _CaregiverProfileTabState extends State<CaregiverProfileTab> {
   }
 
   void _showRemindersManagement() {
-    if (_patientUid == null) {
+    if (_currentPatientUid == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text("Aucun patient lié"),
@@ -389,7 +591,7 @@ class _CaregiverProfileTabState extends State<CaregiverProfileTab> {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) => _RemindersManagementScreen(patientUid: _patientUid!),
+        builder: (_) => _RemindersManagementScreen(patientUid: _currentPatientUid!),
       ),
     );
   }
@@ -457,48 +659,113 @@ class _CaregiverProfileTabState extends State<CaregiverProfileTab> {
 
               const SizedBox(height: 30),
 
-              _card(
-                'Informations du patient',
-                action: _buildGradientButton('Modifier', _showEditDialog),
-                child: Column(
-                  children: [
-                    if ((_patientData?['age'] ?? 0) > 0)
-                      _infoRow(Icons.cake_outlined, 'Âge', '${_patientData!['age']} ans'),
-                    if ((_patientData?['diseaseStage'] ?? '').toString().isNotEmpty) ...[
-                      const SizedBox(height: 10),
-                      _infoRow(Icons.medical_information_outlined, 'Stade', _patientData!['diseaseStage']),
-                    ],
-                    if ((_patientData?['doctor'] ?? '').toString().isNotEmpty) ...[
-                      const SizedBox(height: 10),
-                      _infoRow(Icons.medical_services_outlined, 'Médecin', _patientData!['doctor']),
-                    ],
-                    if ((_patientData?['treatment'] ?? '').toString().isNotEmpty) ...[
-                      const SizedBox(height: 10),
-                      _infoRow(Icons.medication_outlined, 'Traitement', _patientData!['treatment']),
-                    ],
-                    if ((_patientData?['allergies'] ?? '').toString().isNotEmpty) ...[
-                      const SizedBox(height: 10),
-                      _infoRow(Icons.warning_amber_outlined, 'Allergies', _patientData!['allergies']),
-                    ],
-                    if ((_patientData?['diabetes'] ?? '').toString().isNotEmpty) ...[
-                      const SizedBox(height: 10),
-                      _infoRow(Icons.bloodtype_outlined, 'Diabète', _patientData!['diabetes']),
-                    ],
-                    if ((_patientData?['bloodPressure'] ?? '').toString().isNotEmpty) ...[
-                      const SizedBox(height: 10),
-                      _infoRow(Icons.favorite_outline, 'Tension', _patientData!['bloodPressure']),
-                    ],
-                    if ((_patientData?['otherConditions'] ?? '').toString().isNotEmpty) ...[
-                      const SizedBox(height: 10),
-                      _infoRow(Icons.health_and_safety_outlined, 'Autres', _patientData!['otherConditions']),
-                    ],
-                    if ((_patientData?['homeAddress'] ?? '').toString().isNotEmpty) ...[
-                      const SizedBox(height: 10),
-                      _infoRow(Icons.home_outlined, 'Domicile', _patientData!['homeAddress']),
-                    ],
-                  ],
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: GestureDetector(
+                  onTap: _generateInviteCode,
+                  child: Container(
+                    padding: const EdgeInsets.all(20),
+                    decoration: BoxDecoration(
+                      gradient: const LinearGradient(
+                        colors: [Color(0xFF6EC6FF), Color(0xFF4A90E2)],
+                      ),
+                      borderRadius: BorderRadius.circular(16),
+                      boxShadow: [
+                        BoxShadow(
+                          color: const Color(0xFF4A90E2).withOpacity(0.3),
+                          blurRadius: 12,
+                          offset: const Offset(0, 4),
+                        ),
+                      ],
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withOpacity(0.2),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: const Icon(
+                            Icons.qr_code_2,
+                            color: Colors.white,
+                            size: 28,
+                          ),
+                        ),
+                        const SizedBox(width: 16),
+                        const Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Générer un code',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            SizedBox(height: 4),
+                            Text(
+                              'Pour inviter un proche',
+                              style: TextStyle(
+                                color: Colors.white70,
+                                fontSize: 13,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
               ),
+
+              const SizedBox(height: 20),
+
+              if (_patientData != null)
+                _card(
+                  'Informations du patient',
+                  action: _buildGradientButton('Modifier', _showEditDialog),
+                  child: Column(
+                    children: [
+                      if ((_patientData?['age'] ?? 0) > 0)
+                        _infoRow(Icons.cake_outlined, 'Âge', '${_patientData!['age']} ans'),
+                      if ((_patientData?['diseaseStage'] ?? '').toString().isNotEmpty) ...[
+                        const SizedBox(height: 10),
+                        _infoRow(Icons.medical_information_outlined, 'Stade', _patientData!['diseaseStage']),
+                      ],
+                      if ((_patientData?['doctor'] ?? '').toString().isNotEmpty) ...[
+                        const SizedBox(height: 10),
+                        _infoRow(Icons.medical_services_outlined, 'Médecin', _patientData!['doctor']),
+                      ],
+                      if ((_patientData?['treatment'] ?? '').toString().isNotEmpty) ...[
+                        const SizedBox(height: 10),
+                        _infoRow(Icons.medication_outlined, 'Traitement', _patientData!['treatment']),
+                      ],
+                      if ((_patientData?['allergies'] ?? '').toString().isNotEmpty) ...[
+                        const SizedBox(height: 10),
+                        _infoRow(Icons.warning_amber_outlined, 'Allergies', _patientData!['allergies']),
+                      ],
+                      if ((_patientData?['diabetes'] ?? '').toString().isNotEmpty) ...[
+                        const SizedBox(height: 10),
+                        _infoRow(Icons.bloodtype_outlined, 'Diabète', _patientData!['diabetes']),
+                      ],
+                      if ((_patientData?['bloodPressure'] ?? '').toString().isNotEmpty) ...[
+                        const SizedBox(height: 10),
+                        _infoRow(Icons.favorite_outline, 'Tension', _patientData!['bloodPressure']),
+                      ],
+                      if ((_patientData?['otherConditions'] ?? '').toString().isNotEmpty) ...[
+                        const SizedBox(height: 10),
+                        _infoRow(Icons.health_and_safety_outlined, 'Autres', _patientData!['otherConditions']),
+                      ],
+                      if ((_patientData?['homeAddress'] ?? '').toString().isNotEmpty) ...[
+                        const SizedBox(height: 10),
+                        _infoRow(Icons.home_outlined, 'Domicile', _patientData!['homeAddress']),
+                      ],
+                    ],
+                  ),
+                ),
 
               const SizedBox(height: 20),
 

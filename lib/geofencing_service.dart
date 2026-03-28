@@ -3,10 +3,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:workmanager/workmanager.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-
-
 import 'fcm_service.dart';
-
 
 class GeofencingService {
 
@@ -21,7 +18,7 @@ class GeofencingService {
     print("[GeofencingService] Service initialise");
   }
 
-  /// DÉMARRER TRACKING
+  /// DEMARRER TRACKING
   static Future<void> startTracking({int intervalMinutes = 15}) async {
     await Workmanager().registerPeriodicTask(
       "geofence-task",
@@ -53,8 +50,6 @@ void _callbackDispatcher() {
 
     WidgetsFlutterBinding.ensureInitialized();
 
-
-
     try {
       await _checkGeofenceForCurrentUser();
       return Future.value(true);
@@ -76,14 +71,14 @@ Future<void> _checkGeofenceForCurrentUser() async {
     return;
   }
 
-  /// 1️⃣ Vérifier si GPS activé
+  /// Vérifier si GPS activé
   bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
   if (!serviceEnabled) {
     print("[Geofencing] GPS desactive");
     return;
   }
 
-  /// 2️⃣ Vérifier permission
+  /// Vérifier permission
   LocationPermission permission = await Geolocator.checkPermission();
 
   if (permission == LocationPermission.denied) {
@@ -96,7 +91,7 @@ Future<void> _checkGeofenceForCurrentUser() async {
     return;
   }
 
-  /// 3️⃣ Récupérer position
+  /// Récupérer position
   Position position;
 
   try {
@@ -177,7 +172,7 @@ Future<void> _checkGeofence(String uid, Position currentPosition) async {
     });
 
     if (isOutside) {
-      await _createAlert(uid, currentPosition, distance);
+      await _createAlert(uid, currentPosition, distance, data);
     }
 
   } catch (e) {
@@ -185,7 +180,7 @@ Future<void> _checkGeofence(String uid, Position currentPosition) async {
   }
 }
 
-Future<void> _createAlert(String uid, Position position, double distance) async {
+Future<void> _createAlert(String uid, Position position, double distance, Map<String, dynamic> userData) async {
   try {
 
     final recentAlerts = await FirebaseFirestore.instance
@@ -231,18 +226,33 @@ Future<void> _createAlert(String uid, Position position, double distance) async 
       distance: distance.toInt(),
     );
 
-    // Notification push au suiveur
-    await FCMService.sendNotificationToCaregiver(
-      patientUid: uid,
-      title: 'Alerte de zone',
-      body: 'Le patient est sorti de sa zone de securite (${distance.toInt()}m)',
-      data: {
+    // NOUVEAU: Récupérer liste suiveurs
+    final linkedCaregivers = List<String>.from(
+        userData['linkedCaregivers'] ?? []
+    );
+
+    if (linkedCaregivers.isEmpty) {
+      print("[Geofencing] Aucun proche lie");
+      return;
+    }
+
+    // ENVOYER NOTIFICATION A TOUS LES SUIVEURS
+    for (final caregiverId in linkedCaregivers) {
+      await FirebaseFirestore.instance.collection('notifications').add({
+        'caregiverId': caregiverId,
+        'patientId': uid,
         'type': 'geofence',
+        'title': 'Alerte de zone',
+        'message': 'Le patient est sorti de sa zone de securite (${distance.toInt()}m)',
+        'timestamp': FieldValue.serverTimestamp(),
+        'status': 'pending',
         'distance': distance.toInt(),
         'latitude': position.latitude,
         'longitude': position.longitude,
-      },
-    );
+      });
+    }
+
+    print("[Geofencing] Notification envoyee a ${linkedCaregivers.length} proche(s)");
 
   } catch (e) {
     print("[Geofencing] Erreur creation alerte: $e");

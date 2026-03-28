@@ -211,9 +211,9 @@ class FCMService {
 
     _firestoreSubscription = FirebaseFirestore.instance
         .collection('notifications')
-        .where('caregiverId', isEqualTo: caregiverUid)  // CORRECTION ICI
+        .where('caregiverId', isEqualTo: caregiverUid)
         .where('status', isEqualTo: 'pending')
-        .orderBy('timestamp', descending: true)  // CORRECTION ICI (etait 'createdAt')
+        .orderBy('timestamp', descending: true)
         .snapshots()
         .listen((snapshot) async {
       for (var change in snapshot.docChanges) {
@@ -262,6 +262,7 @@ class FCMService {
     });
   }
 
+  // FONCTION MODIFIEE: Multi-caregivers
   static Future<void> sendNotificationToCaregiver({
     required String patientUid,
     required String title,
@@ -275,45 +276,51 @@ class FCMService {
           .doc(patientUid)
           .get();
 
-      final caregiverUid = patientDoc.data()?['linkedCaregiver'] as String?;
+      // NOUVEAU: Liste au lieu d'un seul
+      final linkedCaregivers = List<String>.from(
+          patientDoc.data()?['linkedCaregivers'] ?? []
+      );
 
-      if (caregiverUid == null) {
+      if (linkedCaregivers.isEmpty) {
         debugPrint('[FCM] Aucun caregiver lie');
         return;
       }
 
-      final caregiverDoc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(caregiverUid)
-          .get();
+      // ENVOYER A TOUS LES SUIVEURS
+      for (final caregiverUid in linkedCaregivers) {
+        final caregiverDoc = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(caregiverUid)
+            .get();
 
-      final fcmToken = caregiverDoc.data()?['fcmToken'] as String?;
+        final fcmToken = caregiverDoc.data()?['fcmToken'] as String?;
 
-      if (fcmToken == null) {
-        debugPrint('[FCM] Caregiver sans token FCM');
-        return;
+        if (fcmToken == null) {
+          debugPrint('[FCM] Caregiver $caregiverUid sans token FCM');
+          continue;
+        }
+
+        await FirebaseFirestore.instance
+            .collection('notifications')
+            .add({
+          'caregiverUid': caregiverUid,
+          'to': fcmToken,
+          'notification': {
+            'title': title,
+            'body': body,
+          },
+          'data': {
+            ...?data,
+            'type': type ?? '',
+            'patientUid': patientUid,
+          },
+          'priority': 'high',
+          'createdAt': FieldValue.serverTimestamp(),
+          'status': 'pending',
+        });
       }
 
-      await FirebaseFirestore.instance
-          .collection('notifications')
-          .add({
-        'caregiverUid': caregiverUid,
-        'to': fcmToken,
-        'notification': {
-          'title': title,
-          'body': body,
-        },
-        'data': {
-          ...?data,
-          'type': type ?? '',
-          'patientUid': patientUid,
-        },
-        'priority': 'high',
-        'createdAt': FieldValue.serverTimestamp(),
-        'status': 'pending',
-      });
-
-      debugPrint('[FCM] Notification creee pour caregiver');
+      debugPrint('[FCM] Notification creee pour ${linkedCaregivers.length} caregiver(s)');
     } catch (e) {
       debugPrint('[FCM] Erreur: $e');
     }
@@ -376,7 +383,7 @@ class FCMService {
     await _localNotifications.show(
       1,
       'Alerte de securite',
-      'Le patient est sorti de la zone securisee ($distance m)',
+      'Vous etes sorti de la zone securisee ($distance m)',
       const NotificationDetails(
         android: AndroidNotificationDetails(
           'alzhecare_alerts',

@@ -34,16 +34,17 @@ class _CaregiverSettingsScreenState extends State<CaregiverSettingsScreen> {
         return;
       }
 
-      // Récupérer le document du suiveur
+      // MODIFIE: Récupérer liste patients liés
       final suiveurDoc = await FirebaseFirestore.instance
           .collection('users')
           .doc(user.uid)
           .get();
 
-      // Récupérer l'UID du patient lié
-      final patientUid = suiveurDoc.data()?['linkedPatient'] as String?;
+      final linkedPatients = List<String>.from(
+          suiveurDoc.data()?['linkedPatients'] ?? []
+      );
 
-      if (patientUid == null) {
+      if (linkedPatients.isEmpty) {
         // Pas de patient lié
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -57,7 +58,11 @@ class _CaregiverSettingsScreenState extends State<CaregiverSettingsScreen> {
         return;
       }
 
+      // Afficher le PREMIER patient
+      final patientUid = linkedPatients.first;
       _patientUid = patientUid;
+
+      debugPrint('[Settings] Modification patient: $patientUid');
 
       // Charger les paramètres du patient lié
       final doc = await FirebaseFirestore.instance
@@ -94,6 +99,7 @@ class _CaregiverSettingsScreenState extends State<CaregiverSettingsScreen> {
         setState(() => _isLoading = false);
       }
     } catch (e) {
+      debugPrint('[Settings] Erreur: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(

@@ -39,6 +39,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
         password: _passwordController.text.trim(),
       );
 
+      // Structure de base
       Map<String, dynamic> userData = {
         'name': _nameController.text.trim(),
         'email': _emailController.text.trim(),
@@ -46,7 +47,11 @@ class _SignUpScreenState extends State<SignUpScreen> {
         'createdAt': FieldValue.serverTimestamp(),
       };
 
-      if (_selectedRole == 'suiveur') {
+      // Ajouter champs selon rôle
+      if (_selectedRole == 'patient') {
+        userData['linkedCaregivers'] = [];  // Liste vide de suiveurs
+      } else if (_selectedRole == 'suiveur') {
+        userData['linkedPatients'] = [];    // Liste vide de patients
         userData['phone'] = _phoneController.text.trim();
       }
 
@@ -54,7 +59,6 @@ class _SignUpScreenState extends State<SignUpScreen> {
           .collection('users')
           .doc(userCredential.user!.uid)
           .set(userData);
-
 
       await UserSessionManager.saveSession(
         userCredential.user!.uid,
@@ -347,7 +351,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
                                 SizedBox(width: 4),
                                 Expanded(
                                   child: Text(
-                                    "Le patient utilisera ce numéro pour vous lier",
+                                    "Votre numéro pour vous contacter",
                                     style: TextStyle(fontSize: 12, color: Color(0xFF4A90E2)),
                                   ),
                                 ),
@@ -387,7 +391,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
                                   ),
                                 )
                                     : const Text(
-                                  "Créer un compte →",
+                                  "Créer un compte",
                                   style: TextStyle(
                                     color: Colors.white,
                                     fontSize: 16,

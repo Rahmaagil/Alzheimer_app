@@ -49,6 +49,7 @@ class _LostPatientScreen extends State<LostPatientScreen> {
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) return;
 
+      // Sauvegarder alerte locale
       await FirebaseFirestore.instance
           .collection('users')
           .doc(user.uid)
@@ -61,6 +62,7 @@ class _LostPatientScreen extends State<LostPatientScreen> {
         'status': 'en attente',
       });
 
+      // Mettre à jour position
       await FirebaseFirestore.instance
           .collection('users')
           .doc(user.uid)
@@ -71,6 +73,33 @@ class _LostPatientScreen extends State<LostPatientScreen> {
           'updatedAt': FieldValue.serverTimestamp(),
         },
       });
+
+      // NOUVEAU: Récupérer liste suiveurs et envoyer notification
+      final userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .get();
+
+      final linkedCaregivers = List<String>.from(
+          userDoc.data()?['linkedCaregivers'] ?? []
+      );
+
+      // ENVOYER NOTIFICATION A TOUS LES SUIVEURS
+      for (final caregiverId in linkedCaregivers) {
+        await FirebaseFirestore.instance.collection('notifications').add({
+          'caregiverId': caregiverId,
+          'patientId': user.uid,
+          'type': 'lost',
+          'title': 'Patient perdu',
+          'message': 'Le patient a signalé être perdu',
+          'timestamp': FieldValue.serverTimestamp(),
+          'status': 'pending',
+          'latitude': position.latitude,
+          'longitude': position.longitude,
+        });
+      }
+
+      debugPrint('[LostPatient] Alerte envoyée à ${linkedCaregivers.length} proche(s)');
 
       setState(() {
         _sent = true;
@@ -123,7 +152,7 @@ class _LostPatientScreen extends State<LostPatientScreen> {
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 30),
               child: Column(
                 children: [
-                  // ── ICONE ──
+                  // ICONE
                   Container(
                     width: 100,
                     height: 100,
@@ -163,7 +192,7 @@ class _LostPatientScreen extends State<LostPatientScreen> {
                   const SizedBox(height: 4),
 
                   const Text(
-                    "Votre proche recevra votre position.",
+                    "Vos proches recevront votre position.",
                     style: TextStyle(
                       fontSize: 16,
                       color: Colors.black54,
@@ -172,7 +201,7 @@ class _LostPatientScreen extends State<LostPatientScreen> {
 
                   const SizedBox(height: 35),
 
-                  // ── CARTE STATUT ──
+                  // CARTE STATUT
                   if (_sent)
                     Container(
                       width: double.infinity,
@@ -195,7 +224,7 @@ class _LostPatientScreen extends State<LostPatientScreen> {
                           SizedBox(width: 12),
                           Expanded(
                             child: Text(
-                              "Position envoyée !\nVotre proche a été alerté.",
+                              "Position envoyée !\nVos proches ont été alertés.",
                               style: TextStyle(
                                 fontSize: 16,
                                 fontWeight: FontWeight.bold,
@@ -243,7 +272,7 @@ class _LostPatientScreen extends State<LostPatientScreen> {
 
                   const SizedBox(height: 30),
 
-                  // ── BOUTON ENVOYER ──
+                  // BOUTON ENVOYER
                   SizedBox(
                     width: double.infinity,
                     height: 60,

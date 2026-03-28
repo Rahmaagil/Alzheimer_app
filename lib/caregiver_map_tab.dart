@@ -45,29 +45,27 @@ class _CaregiverMapTabState extends State<CaregiverMapTab> {
         return;
       }
 
-      // Récupérer l'UID du patient
+      // MODIFIE: Récupérer liste patients liés
       final suiveurDoc = await FirebaseFirestore.instance
           .collection('users')
           .doc(user.uid)
           .get();
 
-      String? patientUid = suiveurDoc.data()?['linkedPatient'];
+      final linkedPatients = List<String>.from(
+          suiveurDoc.data()?['linkedPatients'] ?? []
+      );
 
-      if (patientUid == null) {
-        final p = await FirebaseFirestore.instance
-            .collection('users')
-            .where('role', isEqualTo: 'patient')
-            .limit(1)
-            .get();
-        if (p.docs.isNotEmpty) patientUid = p.docs.first.id;
-      }
-
-      if (patientUid == null) {
+      if (linkedPatients.isEmpty) {
+        debugPrint('[Map] Aucun patient lié');
         setState(() => _isLoading = false);
         return;
       }
 
+      // Afficher le PREMIER patient de la liste
+      final patientUid = linkedPatients.first;
       _patientUid = patientUid;
+
+      debugPrint('[Map] Affichage patient: $patientUid');
 
       // Récupérer le nom du patient
       final patientDoc = await FirebaseFirestore.instance
@@ -78,7 +76,7 @@ class _CaregiverMapTabState extends State<CaregiverMapTab> {
       _patientName = patientDoc.data()?['name'] ?? 'Patient';
       _safetyRadius = (patientDoc.data()?['safeZoneRadius'] ?? 300).toDouble();
 
-      // 🔥 ÉCOUTE EN TEMPS RÉEL de la position
+      // ECOUTE EN TEMPS REEL de la position
       _positionSubscription = FirebaseFirestore.instance
           .collection('users')
           .doc(patientUid)
@@ -95,7 +93,7 @@ class _CaregiverMapTabState extends State<CaregiverMapTab> {
             _isLoading = false;
           });
 
-          print("[Map] Position mise à jour en temps réel: "
+          debugPrint("[Map] Position mise à jour: "
               "${newPosition['latitude']}, ${newPosition['longitude']}");
 
           // Auto-recentrer si c'est la première position
@@ -108,7 +106,7 @@ class _CaregiverMapTabState extends State<CaregiverMapTab> {
       setState(() => _isLoading = false);
 
     } catch (e) {
-      print("[Map] Erreur initialisation: $e");
+      debugPrint("[Map] Erreur initialisation: $e");
       setState(() => _isLoading = false);
     }
   }

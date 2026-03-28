@@ -5,6 +5,7 @@ import 'package:alzhecare/find_home_screen.dart';
 import 'package:alzhecare/sign_in_screen.dart';
 import 'package:alzhecare/routine_settings_screen.dart';
 import 'package:alzhecare/patient_fall_monitor_screen.dart';
+import 'package:alzhecare/patient_add_caregiver_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -68,58 +69,77 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
 
-    final userDoc = await FirebaseFirestore.instance
-        .collection('users')
-        .doc(user.uid)
-        .get();
+    try {
+      final userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .get();
 
-    final linkedCaregiver = userDoc.data()?['linkedCaregiver'];
+      // NOUVEAU: Liste au lieu d'un seul
+      final linkedCaregivers = List<String>.from(
+          userDoc.data()?['linkedCaregivers'] ?? []
+      );
 
-    if (linkedCaregiver == null) {
+      if (linkedCaregivers.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Aucun proche lié'),
+              backgroundColor: Colors.orange,
+            ),
+          );
+        }
+        return;
+      }
+
+      // Récupérer position GPS
+      GeoPoint? location;
+      final locationDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .collection('locations')
+          .orderBy('timestamp', descending: true)
+          .limit(1)
+          .get();
+
+      if (locationDoc.docs.isNotEmpty) {
+        location = locationDoc.docs.first.data()['location'] as GeoPoint?;
+      }
+
+      // ENVOYER A TOUS LES SUIVEURS
+      for (final caregiverId in linkedCaregivers) {
+        await FirebaseFirestore.instance.collection('notifications').add({
+          'caregiverId': caregiverId,
+          'patientId': user.uid,
+          'type': 'sos',
+          'title': 'SOS',
+          'message': 'Le patient a déclenché une alerte SOS',
+          'location': location,
+          'timestamp': FieldValue.serverTimestamp(),
+          'status': 'pending',
+          'latitude': location?.latitude,
+          'longitude': location?.longitude,
+        });
+      }
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text("Aucun proche associé"),
-            backgroundColor: Colors.orange,
+          SnackBar(
+            content: Text('SOS envoyé à ${linkedCaregivers.length} proche(s)'),
+            backgroundColor: const Color(0xFFFF5F6D),
           ),
         );
       }
-      return;
-    }
-
-    GeoPoint? location;
-    final locationDoc = await FirebaseFirestore.instance
-        .collection('users')
-        .doc(user.uid)
-        .collection('locations')
-        .orderBy('timestamp', descending: true)
-        .limit(1)
-        .get();
-
-    if (locationDoc.docs.isNotEmpty) {
-      location = locationDoc.docs.first.data()['location'] as GeoPoint?;
-    }
-
-    await FirebaseFirestore.instance
-        .collection('notifications')
-        .add({
-      'caregiverId': linkedCaregiver,
-      'patientId': user.uid,
-      'type': 'sos',
-      'title': 'SOS',
-      'message': 'Le patient a déclenché une alerte SOS',
-      'location': location,
-      'timestamp': FieldValue.serverTimestamp(),
-      'status': 'pending',
-    });
-
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("Alerte SOS envoyée à votre proche"),
-          backgroundColor: Color(0xFFFF5F6D),
-        ),
-      );
+    } catch (e) {
+      debugPrint('[SOS] Erreur: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Erreur: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     }
   }
 
@@ -326,7 +346,7 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
                 },
               ),
 
-              // GRILLE 2x2
+              // GRILLE 2x3 (6 boutons)
               GridView.count(
                 crossAxisCount: 2,
                 shrinkWrap: true,
@@ -395,59 +415,39 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
                       );
                     },
                   ),
-                ],
-              ),
 
-              const SizedBox(height: 25),
+                  _buildCard(
+                    icon: Icons.person_add,
+                    label: "Ajouter proche",
+                    colors: const [
+                      Color(0xFFA8DADC),
+                      Color(0xFF81B4C4),
+                    ],
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const PatientAddCaregiverScreen(),
+                        ),
+                      );
+                    },
+                  ),
 
-              // DETECTION CHUTE CENTREE
-              Center(
-                child: SizedBox(
-                  width: 180,
-                  height: 180,
-                  child: GestureDetector(
+                  _buildCard(
+                    icon: Icons.warning_amber_rounded,
+                    label: "Détection\nChute",
+                    colors: const [
+                      Color(0xFFFFB3BA),
+                      Color(0xFFFF8FA3),
+                    ],
                     onTap: () {
                       Navigator.push(
                         context,
                         MaterialPageRoute(builder: (_) => const PatientFallMonitorScreen()),
                       );
                     },
-                    child: Container(
-                      decoration: BoxDecoration(
-                        gradient: const LinearGradient(
-                          colors: [
-                            Color(0xFFFF5F6D),
-                            Color(0xFFFFC371),
-                          ],
-                        ),
-                        borderRadius: BorderRadius.circular(25),
-                        boxShadow: [
-                          BoxShadow(
-                            color: const Color(0xFFFF5F6D).withOpacity(0.3),
-                            blurRadius: 15,
-                            offset: const Offset(0, 8),
-                          ),
-                        ],
-                      ),
-                      child: const Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(Icons.warning_amber_rounded, size: 50, color: Colors.white),
-                          SizedBox(height: 12),
-                          Text(
-                            "Détection\nChute",
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.white,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
                   ),
-                ),
+                ],
               ),
 
               const SizedBox(height: 40),

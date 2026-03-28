@@ -40,28 +40,31 @@ class _CaregiverHomeScreenState extends State<CaregiverHomeScreen> {
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) return;
 
+      // MODIFIE: Utiliser linkedPatients[] au lieu de linkedPatient
       final suiveurDoc = await FirebaseFirestore.instance
           .collection('users').doc(user.uid).get();
-      String? patientUid = suiveurDoc.data()?['linkedPatient'];
 
-      if (patientUid == null) {
-        final p = await FirebaseFirestore.instance
-            .collection('users')
-            .where('role', isEqualTo: 'patient')
-            .limit(1).get();
-        if (p.docs.isNotEmpty) patientUid = p.docs.first.id;
+      final linkedPatients = List<String>.from(
+          suiveurDoc.data()?['linkedPatients'] ?? []
+      );
+
+      if (linkedPatients.isEmpty) {
+        if (mounted) setState(() => _pendingAlerts = 0);
+        return;
       }
-      if (patientUid == null) return;
 
+      // Ecouter notifications pour ce suiveur
       FirebaseFirestore.instance
-          .collection('users').doc(patientUid)
-          .collection('alerts')
+          .collection('notifications')
+          .where('caregiverId', isEqualTo: user.uid)
           .where('status', isEqualTo: 'pending')
           .snapshots()
           .listen((snap) {
         if (mounted) setState(() => _pendingAlerts = snap.docs.length);
       });
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('[CaregiverHome] Erreur listen alerts: $e');
+    }
   }
 
   final List<Widget> _tabs = const [

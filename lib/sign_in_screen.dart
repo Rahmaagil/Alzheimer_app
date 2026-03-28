@@ -1,6 +1,5 @@
 import 'package:alzhecare/caregiver_home_screen.dart';
 import 'package:alzhecare/patient_home_screen.dart';
-import 'package:alzhecare/patient_setup_screen.dart';
 import 'package:alzhecare/reset_password_screen.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
@@ -40,7 +39,7 @@ class _SignInScreenState extends State<SignInScreen> {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text("Veuillez verifier votre email avant de vous connecter."),
+              content: Text("Veuillez vérifier votre email avant de vous connecter."),
               backgroundColor: Colors.orange,
             ),
           );
@@ -58,34 +57,23 @@ class _SignInScreenState extends State<SignInScreen> {
       if (userDoc.exists) {
         String role = userDoc['role'] as String? ?? 'patient';
 
-
         await UserSessionManager.saveSession(
-          userCredential.user!.uid ,
+          userCredential.user!.uid,
           role,
         );
 
         if (role == 'patient') {
           await GeofencingService.startTracking(intervalMinutes: 15);
-          print("[SignIn] Geofencing demarre pour le patient");
+          print("[SignIn] Geofencing démarré pour le patient");
         }
 
         if (mounted) {
+          // MODIFICATION PRINCIPALE: Redirection directe sans vérifier setupCompleted
           if (role == 'patient') {
-            // CORRIGE : Cast du data
-            final data = userDoc.data() as Map<String, dynamic>?;
-            final setupCompleted = data?['setupCompleted'] as bool? ?? false;
-
-            if (setupCompleted) {
-              Navigator.pushReplacement(
-                context,
-                MaterialPageRoute(builder: (_) => const PatientHomeScreen()),
-              );
-            } else {
-              Navigator.pushReplacement(
-                context,
-                MaterialPageRoute(builder: (_) => const PatientSetupScreen()),
-              );
-            }
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(builder: (_) => const PatientHomeScreen()),
+            );
           } else {
             Navigator.pushReplacement(
               context,
@@ -95,7 +83,7 @@ class _SignInScreenState extends State<SignInScreen> {
 
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text("Connexion reussie en tant que $role"),
+              content: Text("Connexion réussie en tant que $role"),
               backgroundColor: Colors.green,
             ),
           );
@@ -104,7 +92,7 @@ class _SignInScreenState extends State<SignInScreen> {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text("Utilisateur non trouve dans la base de donnees."),
+              content: Text("Utilisateur non trouvé dans la base de données."),
               backgroundColor: Colors.red,
             ),
           );
@@ -114,7 +102,7 @@ class _SignInScreenState extends State<SignInScreen> {
       String message = "Erreur de connexion";
       switch (e.code) {
         case 'user-not-found':
-          message = "Aucun compte associe a cet email";
+          message = "Aucun compte associé à cet email";
           break;
         case 'wrong-password':
           message = "Mot de passe incorrect";
@@ -123,7 +111,7 @@ class _SignInScreenState extends State<SignInScreen> {
           message = "Email invalide";
           break;
         case 'user-disabled':
-          message = "Compte desactive";
+          message = "Compte désactivé";
           break;
         case 'invalid-credential':
           message = "Email ou mot de passe incorrect";
@@ -264,7 +252,7 @@ class _SignInScreenState extends State<SignInScreen> {
                               );
                             },
                             child: const Text(
-                              "Mot de passe oublie ?",
+                              "Mot de passe oublié ?",
                               style: TextStyle(color: Color(0xFF2E5AAC)),
                             ),
                           ),
@@ -322,7 +310,7 @@ class _SignInScreenState extends State<SignInScreen> {
                               );
                             },
                             child: const Text(
-                              "Pas de compte ? Creer un compte",
+                              "Pas de compte ? Créer un compte",
                               style: TextStyle(color: Color(0xFF2E5AAC)),
                             ),
                           ),

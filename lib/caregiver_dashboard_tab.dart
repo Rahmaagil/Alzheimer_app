@@ -15,6 +15,7 @@ class _CaregiverDashboardTabState extends State<CaregiverDashboardTab> {
   Map<String, dynamic>? _lastPosition;
   List<Map<String, dynamic>> _recentAlerts = [];
   bool _isLoading = true;
+  String? _patientUid;
 
   @override
   void initState() {
@@ -26,26 +27,32 @@ class _CaregiverDashboardTabState extends State<CaregiverDashboardTab> {
     setState(() => _isLoading = true);
     try {
       final user = FirebaseAuth.instance.currentUser;
-      if (user == null) return;
+      if (user == null) {
+        setState(() => _isLoading = false);
+        return;
+      }
 
+      // MODIFIE: Récupérer liste patients liés
       final suiveurDoc = await FirebaseFirestore.instance
           .collection('users')
           .doc(user.uid)
           .get();
-      String? patientUid = suiveurDoc.data()?['linkedPatient'];
 
-      if (patientUid == null) {
-        final p = await FirebaseFirestore.instance
-            .collection('users')
-            .where('role', isEqualTo: 'patient')
-            .limit(1)
-            .get();
-        if (p.docs.isNotEmpty) patientUid = p.docs.first.id;
-      }
-      if (patientUid == null) {
+      final linkedPatients = List<String>.from(
+          suiveurDoc.data()?['linkedPatients'] ?? []
+      );
+
+      if (linkedPatients.isEmpty) {
+        debugPrint('[Dashboard] Aucun patient lié');
         setState(() => _isLoading = false);
         return;
       }
+
+      // Afficher le PREMIER patient de la liste
+      final patientUid = linkedPatients.first;
+      _patientUid = patientUid;
+
+      debugPrint('[Dashboard] Affichage patient: $patientUid');
 
       final patDoc = await FirebaseFirestore.instance
           .collection('users')
@@ -54,11 +61,11 @@ class _CaregiverDashboardTabState extends State<CaregiverDashboardTab> {
       _patientData = patDoc.data();
       _lastPosition = _patientData?['lastPosition'];
 
+      // MODIFIE: Charger alertes depuis collection notifications
       final alertsSnap = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(patientUid)
-          .collection('alerts')
-          .where('status', whereIn: ['pending', 'seen'])
+          .collection('notifications')
+          .where('caregiverId', isEqualTo: user.uid)
+          .where('patientId', isEqualTo: patientUid)
           .orderBy('timestamp', descending: true)
           .limit(10)
           .get();
@@ -82,7 +89,8 @@ class _CaregiverDashboardTabState extends State<CaregiverDashboardTab> {
 
       _recentAlerts = list;
       setState(() => _isLoading = false);
-    } catch (_) {
+    } catch (e) {
+      debugPrint('[Dashboard] Erreur: $e');
       setState(() => _isLoading = false);
     }
   }
@@ -97,7 +105,7 @@ class _CaregiverDashboardTabState extends State<CaregiverDashboardTab> {
 
     final diff = DateTime.now().difference(timestamp.toDate());
     final isRecent = diff.inMinutes < 30;
-    final isDangerous = (type == 'SOS' || type == 'perdu');
+    final isDangerous = (type == 'sos' || type == 'lost' || type == 'fall');
 
     return !(isRecent && isDangerous);
   }
@@ -159,6 +167,8 @@ class _CaregiverDashboardTabState extends State<CaregiverDashboardTab> {
             ? const Center(
             child:
             CircularProgressIndicator(color: Color(0xFF4A90E2)))
+            : _patientData == null
+            ? _noPatientWidget()
             : RefreshIndicator(
           onRefresh: _loadData,
           color: const Color(0xFF4A90E2),
@@ -562,17 +572,26 @@ class _CaregiverDashboardTabState extends State<CaregiverDashboardTab> {
                         )
                       else
                         ..._recentAlerts.take(3).map((a) {
-                          final type = a['type'] as String;
-                          final isSOS = type == 'SOS';
+                          final type = (a['type'] as String).toLowerCase();
+                          final isSOS = type == 'sos';
+                          final isFall = type == 'fall' || type.contains('chute');
                           final color = isSOS
                               ? const Color(0xFFFF5F6D)
+                              : isFall
+                              ? const Color(0xFFE91E63)
                               : const Color(0xFFFFB74D);
                           final icon = isSOS
                               ? Icons.warning_rounded
+                              : isFall
+                              ? Icons.personal_injury
                               : Icons.location_off;
                           final label = isSOS
                               ? 'Alerte SOS'
-                              : type == 'perdu'
+                              : isFall
+                              ? 'Chute detectee'
+                              : type.contains('perdu') || type.contains('lost')
+                              ? 'Patient perdu'
+                              : type.contains('geofence') || type.contains('zone')
                               ? 'Sortie de zone'
                               : type;
 
@@ -586,6 +605,11 @@ class _CaregiverDashboardTabState extends State<CaregiverDashboardTab> {
                                     ? [
                                   const Color(0xFFFF5F6D),
                                   const Color(0xFFFFC371)
+                                ]
+                                    : isFall
+                                    ? [
+                                  const Color(0xFFE91E63),
+                                  const Color(0xFFEC407A)
                                 ]
                                     : [
                                   const Color(0xFFFFB74D),
@@ -656,6 +680,50 @@ class _CaregiverDashboardTabState extends State<CaregiverDashboardTab> {
             ),
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _noPatientWidget() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Container(
+            width: 120,
+            height: 120,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: const Color(0xFF4A90E2).withOpacity(0.1),
+            ),
+            child: const Icon(
+              Icons.person_add_outlined,
+              size: 60,
+              color: Color(0xFF4A90E2),
+            ),
+          ),
+          const SizedBox(height: 24),
+          const Text(
+            'Aucun patient lié',
+            style: TextStyle(
+              fontSize: 22,
+              fontWeight: FontWeight.bold,
+              color: Color(0xFF2E5AAC),
+            ),
+          ),
+          const SizedBox(height: 12),
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 40),
+            child: Text(
+              'Générez un code d\'invitation dans votre profil pour lier un patient',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 15,
+                color: Colors.black54,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
