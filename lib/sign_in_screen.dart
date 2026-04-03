@@ -68,7 +68,7 @@ class _SignInScreenState extends State<SignInScreen> {
         }
 
         if (mounted) {
-          // MODIFICATION PRINCIPALE: Redirection directe sans vérifier setupCompleted
+
           if (role == 'patient') {
             Navigator.pushReplacement(
               context,

@@ -26,14 +26,12 @@ class _CaregiverAlertsTabState extends State<CaregiverAlertsTab> {
   @override
   void initState() {
     super.initState();
+    _initializeLocalNotifications();
 
-    // VERSION DEBUG: Initialisation minimale
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
-        setState(() {
-          _isLoadingPatients = false;
-          _linkedPatientIds = [];
-        });
+        _loadLinkedPatients();
       }
     });
   }
@@ -63,37 +61,95 @@ class _CaregiverAlertsTabState extends State<CaregiverAlertsTab> {
     }
   }
 
-  // VERSION SIMPLIFIEE pour debug
+  // CORRECTION COMPLETE: Charge vraiment les patients depuis Firebase
   Future<void> _loadLinkedPatients() async {
-    debugPrint('[Alerts] Début chargement...');
+    debugPrint('[Alerts] Debut chargement patients...');
 
     setState(() => _isLoadingPatients = true);
 
     final user = FirebaseAuth.instance.currentUser;
 
     if (user == null) {
-      debugPrint('[Alerts] Pas de user connecté');
-      setState(() => _isLoadingPatients = false);
+      debugPrint('[Alerts] Pas de user connecte');
+      setState(() {
+        _linkedPatientIds = [];
+        _isLoadingPatients = false;
+      });
       return;
     }
 
-    debugPrint('[Alerts] User UID: ${user.uid}');
+    try {
+      debugPrint('[Alerts] User UID: ${user.uid}');
 
-    // TEMPORAIRE: Pas de filtre patients
-    setState(() {
-      _linkedPatientIds = []; // Vide pour l'instant
-      _isLoadingPatients = false;
-    });
+      // CHARGER DOCUMENT CAREGIVER
+      final caregiverDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .get();
 
-    debugPrint('[Alerts] Chargement terminé');
-    _setupRealtimeListener();
+      if (!caregiverDoc.exists) {
+        debugPrint('[Alerts] Document caregiver non trouve');
+        setState(() {
+          _linkedPatientIds = [];
+          _isLoadingPatients = false;
+        });
+        return;
+      }
+
+      final data = caregiverDoc.data() as Map<String, dynamic>;
+
+      // EXTRAIRE linkedPatients (Array)
+      final linkedPatients = data['linkedPatients'];
+
+      debugPrint('[Alerts] linkedPatients brut: $linkedPatients');
+      debugPrint('[Alerts] Type: ${linkedPatients.runtimeType}');
+
+      List<String> patientIds = [];
+
+      if (linkedPatients != null) {
+        if (linkedPatients is List) {
+          // Nouveau systeme (Array)
+          patientIds = linkedPatients
+              .where((id) => id != null && id.toString().isNotEmpty)
+              .map((id) => id.toString())
+              .toList();
+        } else if (linkedPatients is String && linkedPatients.isNotEmpty) {
+          // Ancien systeme (String) - pour compatibilite
+          patientIds = [linkedPatients];
+        }
+      }
+
+      debugPrint('[Alerts] Patients lies trouves: $patientIds');
+
+      setState(() {
+        _linkedPatientIds = patientIds;
+        _isLoadingPatients = false;
+      });
+
+      // Setup listener seulement si patients lies
+      if (patientIds.isNotEmpty) {
+        _setupRealtimeListener();
+      }
+
+    } catch (e) {
+      debugPrint('[Alerts] Erreur chargement patients: $e');
+      setState(() {
+        _linkedPatientIds = [];
+        _isLoadingPatients = false;
+      });
+    }
   }
 
   void _setupRealtimeListener() {
     _alertsSubscription?.cancel();
 
     final user = FirebaseAuth.instance.currentUser;
-    if (user == null || _linkedPatientIds.isEmpty) return;
+    if (user == null || _linkedPatientIds.isEmpty) {
+      debugPrint('[Alerts] Pas de listener: user null ou pas de patients');
+      return;
+    }
+
+    debugPrint('[Alerts] Setup listener pour ${_linkedPatientIds.length} patients');
 
     _alertsSubscription = FirebaseFirestore.instance
         .collection('notifications')
@@ -106,7 +162,6 @@ class _CaregiverAlertsTabState extends State<CaregiverAlertsTab> {
         if (change.type == DocumentChangeType.added) {
           final data = change.doc.data() as Map<String, dynamic>?;
           if (data != null) {
-            // Vérifier que l'alerte vient d'un patient lié
             final patientId = data['patientId'] as String?;
             if (patientId != null && _linkedPatientIds.contains(patientId)) {
               _showNotification(data);
@@ -210,7 +265,6 @@ class _CaregiverAlertsTabState extends State<CaregiverAlertsTab> {
     );
   }
 
-  // MODIFIE: Marquer comme "seen" au lieu de "pending"
   Future<void> _markAllAlertsAsSeen() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
@@ -235,7 +289,7 @@ class _CaregiverAlertsTabState extends State<CaregiverAlertsTab> {
       }
 
       await batch.commit();
-      debugPrint('[Alerts] ${snapshot.docs.length} alertes marquées comme vues');
+      debugPrint('[Alerts] ${snapshot.docs.length} alertes marquees comme vues');
     } catch (e) {
       debugPrint('Error marking alerts as seen: $e');
     }
@@ -378,7 +432,6 @@ class _CaregiverAlertsTabState extends State<CaregiverAlertsTab> {
     );
   }
 
-  // NOUVEAU: Message si aucun patient lié
   Widget _buildNoPatientView() {
     return Center(
       child: Column(
@@ -460,7 +513,6 @@ class _CaregiverAlertsTabState extends State<CaregiverAlertsTab> {
                     alignment: Alignment.center,
                     children: [
                       const Icon(Icons.notifications, color: Colors.white, size: 28),
-                      // BADGE ROUGE (disparaît si count == 0)
                       if (count > 0)
                         Positioned(
                           top: 8,
@@ -677,10 +729,13 @@ class _CaregiverAlertsTabState extends State<CaregiverAlertsTab> {
             stream: FirebaseFirestore.instance
                 .collection('notifications')
                 .where('caregiverId', isEqualTo: user.uid)
-                .orderBy('timestamp', descending: true)
+            // CORRECTION: Enlever orderBy temporairement
                 .snapshots(),
             builder: (context, snapshot) {
               if (snapshot.hasError) {
+                // AFFICHER L'ERREUR EXACTE POUR DEBUG
+                debugPrint('[Alerts] Erreur StreamBuilder: ${snapshot.error}');
+
                 return Center(
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
@@ -701,6 +756,15 @@ class _CaregiverAlertsTabState extends State<CaregiverAlertsTab> {
                         'Erreur de chargement',
                         style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                       ),
+                      const SizedBox(height: 8),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 40),
+                        child: Text(
+                          '${snapshot.error}',
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(fontSize: 12, color: Colors.red),
+                        ),
+                      ),
                     ],
                   ),
                 );
@@ -714,9 +778,23 @@ class _CaregiverAlertsTabState extends State<CaregiverAlertsTab> {
                 );
               }
 
-              final docs = snapshot.data?.docs ?? [];
+              var docs = snapshot.data?.docs ?? [];
 
-              // TEMPORAIRE: Pas de filtre patients pour debug
+              // TRIER MANUELLEMENT EN CODE (au lieu de orderBy Firestore)
+              docs.sort((a, b) {
+                final aData = a.data() as Map<String, dynamic>;
+                final bData = b.data() as Map<String, dynamic>;
+                final aTime = aData['timestamp'] as Timestamp?;
+                final bTime = bData['timestamp'] as Timestamp?;
+
+                if (aTime == null && bTime == null) return 0;
+                if (aTime == null) return 1;
+                if (bTime == null) return -1;
+
+                return bTime.compareTo(aTime); // Descending
+              });
+
+              // FILTRE PAR TYPE
               var filtered = docs.where((doc) {
                 final data = doc.data() as Map<String, dynamic>;
                 final type = (data['type'] ?? '').toString().toLowerCase();
@@ -747,7 +825,7 @@ class _CaregiverAlertsTabState extends State<CaregiverAlertsTab> {
                         height: 100,
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
-                          color: const Color(0xFF4A90E2).withValues(alpha: 0.1),
+                          color: const Color(0xFF4A90E2).withOpacity(0.1),
                         ),
                         child: const Icon(
                           Icons.notifications_off_outlined,

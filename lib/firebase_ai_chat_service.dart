@@ -1,93 +1,82 @@
-import 'package:firebase_vertexai/firebase_vertexai.dart';
+import 'dart:convert';
+import 'package:http/http.dart' as http;
+import 'config/env.dart';
 
 class FirebaseAIChatService {
-  static GenerativeModel? _model;
-  static ChatSession? _chatSession;
+  static const String _apiKey = Env.geminiApiKey;
+  static const String _model = 'gemini-2.5-flash';
+  static final List<Map<String, dynamic>> _history = [];
 
-  /// Initialiser le modèle Firebase Vertex AI (pas besoin de clé API !)
-  static void initialize() {
-    if (_model != null) return;
-
-    try {
-      // Utilise Firebase directement - pas besoin de clé API !
-      _model = FirebaseVertexAI.instance.generativeModel(
-        model: 'gemini-2.0-flash-exp',  // Nouveau modèle Gemini 2.0
-        systemInstruction: Content.system('''
+  static const String _systemPrompt = '''
 Tu es un assistant virtuel spécialisé dans l'accompagnement des aidants de patients atteints de la maladie d'Alzheimer.
+Réponds en français, sois concis (2-3 paragraphes maximum), positif et rassurant.
+Ne fais JAMAIS de diagnostic médical.
+''';
 
-Ton rôle :
-- Fournir des conseils pratiques et bienveillants
-- Expliquer les comportements liés à Alzheimer
-- Suggérer des activités adaptées pour les patients
-- Aider à gérer le stress des aidants
-- Rappeler l'importance des routines et de la patience
-- Être empathique et encourageant
-
-Règles :
-- Réponds en français
-- Sois concis (2-3 paragraphes maximum)
-- Reste positif et rassurant
-- N'hésite pas à demander plus de détails si nécessaire
-- Ne fais JAMAIS de diagnostic médical
-- Recommande de consulter un médecin pour les questions médicales sérieuses
-
-Contexte de l'app :
-L'aidant utilise une app mobile appelée "AlzheCare" qui permet de suivre un patient Alzheimer en temps réel avec GPS, alertes, reconnaissance faciale, et rappels de médicaments.
-'''),
-      );
-
-      print("[Firebase AI] Modèle initialisé avec succès");
-    } catch (e) {
-      print("[Firebase AI] Erreur initialisation: $e");
-    }
+  static void initialize() {
+    print("[Gemini HTTP] Initialisé ");
   }
 
-  /// Démarrer une nouvelle conversation
   static void startNewChat() {
-    if (_model == null) initialize();
-
-    _chatSession = _model!.startChat(history: [
-      Content.text('Bonjour ! Je suis là pour t\'aider à prendre soin de ton proche atteint d\'Alzheimer. Comment puis-je t\'aider aujourd\'hui ?'),
-      Content.model([TextPart('Bonjour ! Je suis ravi de pouvoir t\'accompagner. N\'hésite pas à me poser des questions sur la maladie, les comportements de ton proche, ou sur ton propre bien-être en tant qu\'aidant. Je suis là pour toi. ')])
-    ]);
-
-    print("[Firebase AI] Nouvelle conversation démarrée");
+    _history.clear();
   }
 
-  /// Envoyer un message et recevoir une réponse
   static Future<String> sendMessage(String userMessage) async {
     try {
-      if (_chatSession == null) {
-        startNewChat();
-      }
+      _history.add({
+        "role": "user",
+        "parts": [{"text": userMessage}]
+      });
 
-      print("[Firebase AI] Envoi du message: $userMessage");
+      final url = Uri.parse(
 
-      final response = await _chatSession!.sendMessage(
-        Content.text(userMessage),
+          'https://generativelanguage.googleapis.com/v1beta/models/$_model:generateContent?key=$_apiKey'
       );
 
-      final reply = response.text ?? "Désolé, je n'ai pas pu générer de réponse.";
-      print("[Firebase AI] Réponse reçue: ${reply.substring(0, reply.length > 50 ? 50 : reply.length)}...");
+      final contents = [
+        {
+          "role": "user",
+          "parts": [{"text": _systemPrompt}]
+        },
+        {
+          "role": "model",
+          "parts": [{"text": "Compris ! Je suis prêt à aider les aidants AlzheCare."}]
+        },
+        ..._history
+      ];
 
-      return reply;
+      final body = jsonEncode({
+        "contents": contents,
+        "generationConfig": {
+          "temperature": 0.7,
+          "maxOutputTokens": 1000,
+        }
+      });
 
-    } catch (e) {
-      print("[Firebase AI] Erreur: $e");
+      final response = await http.post(
+        url,
+        headers: {"Content-Type": "application/json"},
+        body: body,
+      );
 
-      if (e.toString().contains('PERMISSION_DENIED')) {
-        return "Vertex AI n'est pas activé.\n\nVa sur Firebase Console → Vertex AI → Enable";
-      } else if (e.toString().contains('QUOTA_EXCEEDED')) {
-        return "Quota dépassé. Attends quelques minutes.";
-      } else if (e.toString().contains('NOT_FOUND')) {
-        return "Modèle non trouvé. Vérifie que Vertex AI est activé dans Firebase Console.";
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final reply = data['candidates'][0]['content']['parts'][0]['text'];
+        _history.add({
+          "role": "model",
+          "parts": [{"text": reply}]
+        });
+        return reply;
       } else {
-        return "Désolé, une erreur s'est produite. Peux-tu reformuler ta question ?\n\n(Erreur: ${e.toString().substring(0, 100)})";
+        final error = jsonDecode(response.body);
+        final errorMsg = error['error']['message'] ?? 'Erreur inconnue';
+        return "Désolé, une erreur s'est produite.\n\n(Erreur: $errorMsg)";
       }
+    } catch (e) {
+      return "Désolé, une erreur de connexion s'est produite.";
     }
   }
 
-  /// Obtenir des suggestions de questions
   static List<String> getSuggestions() {
     return [
       "Comment gérer l'agitation le soir ?",
@@ -99,14 +88,11 @@ L'aidant utilise une app mobile appelée "AlzheCare" qui permet de suivre un pat
     ];
   }
 
-  /// Réinitialiser la conversation
   static void resetChat() {
-    _chatSession = null;
-    print("[Firebase AI] Conversation réinitialisée");
+    _history.clear();
   }
 
-  /// Obtenir l'historique de la conversation
-  static Iterable<Content> getHistory() {
-    return _chatSession?.history ?? [];
+  static List<Map<String, dynamic>> getHistory() {
+    return _history;
   }
 }

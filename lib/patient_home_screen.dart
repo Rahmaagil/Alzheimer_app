@@ -75,7 +75,7 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
           .doc(user.uid)
           .get();
 
-      // NOUVEAU: Liste au lieu d'un seul
+
       final linkedCaregivers = List<String>.from(
           userDoc.data()?['linkedCaregivers'] ?? []
       );
@@ -405,8 +405,8 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
                     icon: Icons.face,
                     label: "Mes proches",
                     colors: const [
-                      Color(0xFF1DBF73),
-                      Color(0xFF11998E),
+                      Color(0xFF81C784),
+                      Color(0xFF4CAF50),
                     ],
                     onTap: () {
                       Navigator.push(
@@ -420,8 +420,8 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
                     icon: Icons.person_add,
                     label: "Ajouter proche",
                     colors: const [
-                      Color(0xFFA8DADC),
-                      Color(0xFF81B4C4),
+                      Color(0xFF26C6DA),
+                      Color(0xFF00ACC1),
                     ],
                     onTap: () {
                       Navigator.push(
@@ -437,8 +437,8 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
                     icon: Icons.warning_amber_rounded,
                     label: "Détection\nChute",
                     colors: const [
-                      Color(0xFFFFB3BA),
-                      Color(0xFFFF8FA3),
+                      Color(0xFFFF5722),
+                      Color(0xFFE64A19),
                     ],
                     onTap: () {
                       Navigator.push(
