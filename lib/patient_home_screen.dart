@@ -13,6 +13,7 @@ import 'package:geolocator/geolocator.dart';
 import 'smart_recognition_screen.dart';
 import 'geofencing_service.dart';
 import 'user_session_manager.dart';
+import 'fall_detection_background_service.dart';
 
 class PatientHomeScreen extends StatefulWidget {
   const PatientHomeScreen({super.key});
@@ -31,6 +32,16 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
     super.initState();
     _loadUserData();
     _startGeofencing();
+    _startFallDetection();
+  }
+
+  Future<void> _startFallDetection() async {
+    try {
+      await FallDetectionBackgroundService.startForPatient();
+      debugPrint('[PatientHome] Détection chute démarrée en arrière-plan');
+    } catch (e) {
+      debugPrint('[PatientHome] Erreur démarrage détection chute: $e');
+    }
   }
 
   Future<void> _loadUserData() async {
@@ -169,6 +180,7 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
     if (confirm != true) return;
 
     try {
+      FallDetectionBackgroundService.stop();
       await GeofencingService.stopTracking();
       await UserSessionManager.clearSession();
       await FirebaseAuth.instance.signOut();

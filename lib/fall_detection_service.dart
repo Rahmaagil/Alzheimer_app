@@ -25,7 +25,10 @@ class FallDetectionService {
 
   bool isInitialized = false;
   bool _isMonitoring = false;
-  bool isPaused = false; // NOUVEAU: Pause temporaire
+  bool isPaused = false;
+
+  DateTime? _lastFallDetectionTime;
+  static const int COOLDOWN_SECONDS = 10;
 
   Function(bool isFall, double confidence)? onFallDetected;
 
@@ -37,7 +40,9 @@ class FallDetectionService {
       _scalerMean = List<double>.from(scalerData['mean']);
       _scalerScale = List<double>.from(scalerData['scale']);
       isInitialized = true;
+      debugPrint('[FallDetection] Service initialisé avec succès');
     } catch (e) {
+      debugPrint('[FallDetection] Erreur initialisation: $e');
       rethrow;
     }
   }
@@ -48,6 +53,9 @@ class FallDetectionService {
     _isMonitoring = true;
     _sensorBuffer.clear();
     isPaused = false;
+    _lastFallDetectionTime = null;
+
+    debugPrint('[FallDetection] Démarrage surveillance');
 
     _accelSubscription = accelerometerEvents.listen((event) {
       _lastAccel = [event.x, event.y, event.z];
@@ -65,20 +73,22 @@ class FallDetectionService {
     _accelSubscription?.cancel();
     _gyroSubscription?.cancel();
     _sensorBuffer.clear();
+    debugPrint('[FallDetection] Surveillance arrêtée');
   }
 
-  // NOUVEAU: Pause temporaire
   void pauseDetection() {
+    debugPrint('[FallDetection] Pause détection');
     isPaused = true;
   }
 
   void resumeDetection() {
+    debugPrint('[FallDetection] Reprise détection');
     isPaused = false;
-    _sensorBuffer.clear(); // Vider buffer pour éviter anciennes données
+    _sensorBuffer.clear();
   }
 
   void _addSensorData() {
-    if (_lastAccel == null || _lastGyro == null || isPaused) return; // MODIFIÉ
+    if (_lastAccel == null || _lastGyro == null || isPaused) return;
 
     final data = [..._lastAccel!, ..._lastGyro!, ..._lastAccel!];
     _sensorBuffer.add(data);
@@ -93,7 +103,14 @@ class FallDetectionService {
   }
 
   void _analyzeWindow() {
-    if (isPaused) return; // NOUVEAU: Ne pas analyser si en pause
+    if (isPaused) return;
+
+    if (_lastFallDetectionTime != null) {
+      final timeSinceLastDetection = DateTime.now().difference(_lastFallDetectionTime!);
+      if (timeSinceLastDetection.inSeconds < COOLDOWN_SECONDS) {
+        return;
+      }
+    }
 
     try {
       final window = _sensorBuffer.sublist(_sensorBuffer.length - WINDOW_SIZE);
@@ -105,13 +122,18 @@ class FallDetectionService {
 
       _interpreter!.run(input, output);
 
+      final probADL = output[0][0];
       final probFall = output[0][1];
 
+      debugPrint('[FallDetection] Analyse: ADL=${probADL.toStringAsFixed(3)}, Fall=${probFall.toStringAsFixed(3)}');
+
       if (probFall > FALL_THRESHOLD) {
+        debugPrint('[FallDetection] CHUTE DÉTECTÉE! Confiance: ${probFall.toStringAsFixed(3)}');
+        _lastFallDetectionTime = DateTime.now();
         onFallDetected?.call(true, probFall);
       }
     } catch (e) {
-      // Ignorer erreur
+      debugPrint('[FallDetection] Erreur analyse: $e');
     }
   }
 

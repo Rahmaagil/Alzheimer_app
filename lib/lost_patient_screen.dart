@@ -74,7 +74,7 @@ class _LostPatientScreen extends State<LostPatientScreen> {
         },
       });
 
-      // NOUVEAU: Récupérer liste suiveurs et envoyer notification
+      //  Récupérer liste suiveurs et envoyer notification
       final userDoc = await FirebaseFirestore.instance
           .collection('users')
           .doc(user.uid)

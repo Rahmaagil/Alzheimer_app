@@ -262,7 +262,7 @@ class FCMService {
     });
   }
 
-  // FONCTION MODIFIEE: Multi-caregivers
+
   static Future<void> sendNotificationToCaregiver({
     required String patientUid,
     required String title,
@@ -276,7 +276,7 @@ class FCMService {
           .doc(patientUid)
           .get();
 
-      // NOUVEAU: Liste au lieu d'un seul
+
       final linkedCaregivers = List<String>.from(
           patientDoc.data()?['linkedCaregivers'] ?? []
       );

@@ -4,9 +4,6 @@ import 'dart:math';
 /// Service de liaison entre patients et suiveurs via codes d'invitation
 class PatientCaregiverLinkService {
 
-  // ========================================
-  // GENERATION CODE
-  // ========================================
 
   /// Génère un code d'invitation unique (6 caractères)
   /// Exclut O, I, 0, 1 pour éviter confusion
@@ -77,9 +74,7 @@ class PatientCaregiverLinkService {
     }
   }
 
-  // ========================================
-  // LIAISON AVEC CODE
-  // ========================================
+
 
   /// Valide et utilise un code d'invitation (côté patient)
   ///
@@ -185,7 +180,7 @@ class PatientCaregiverLinkService {
         'lastLinkedAt': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
 
-      print("[LinkCode] ✅ Suiveur ajouté à liste patient");
+      print("[LinkCode] Suiveur ajouté à liste patient");
 
       // 2. Ajouter patient à la liste du suiveur
       await FirebaseFirestore.instance
@@ -196,7 +191,7 @@ class PatientCaregiverLinkService {
         'lastLinkedAt': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
 
-      print("[LinkCode] ✅ Patient ajouté à liste suiveur");
+      print("[LinkCode] Patient ajouté à liste suiveur");
 
       // 3. Marquer code comme utilisé
       await codeDoc.reference.update({
@@ -204,7 +199,7 @@ class PatientCaregiverLinkService {
         'lastUsedAt': FieldValue.serverTimestamp(),
       });
 
-      print("[LinkCode] ✅ Code marqué comme utilisé");
+      print("[LinkCode] Code marqué comme utilisé");
       print("[LinkCode] Liaison réussie avec $caregiverName ($caregiverEmail)");
 
       return {
@@ -224,9 +219,7 @@ class PatientCaregiverLinkService {
     }
   }
 
-  // ========================================
-  // GESTION LIAISONS
-  // ========================================
+
 
   /// Supprime un suiveur spécifique de la liste d'un patient
   ///
@@ -255,11 +248,11 @@ class PatientCaregiverLinkService {
         'linkedCaregivers': FieldValue.arrayRemove([caregiverUid]),
       });
 
-      print("[Unlink] ✅ Liaison supprimée avec succès");
+      print("[Unlink] Liaison supprimée avec succès");
       return true;
 
     } catch (e) {
-      print("[Unlink] ❌ Erreur: $e");
+      print("[Unlink]  Erreur: $e");
       return false;
     }
   }
@@ -371,9 +364,6 @@ class PatientCaregiverLinkService {
     }
   }
 
-  // ========================================
-  // NETTOYAGE CODES EXPIRES
-  // ========================================
 
   /// Supprime tous les codes expirés (maintenance)
   /// A appeler périodiquement (ex: Cloud Function)

@@ -808,7 +808,7 @@ class _CaregiverProfileTabState extends State<CaregiverProfileTab> {
                                   ),
                                   SizedBox(height: 4),
                                   Text(
-                                    'Domicile, rayon, notifications',
+                                    'Domicile, rayon',
                                     style: TextStyle(fontSize: 14, color: Colors.black54),
                                   ),
                                 ],
@@ -1004,27 +1004,25 @@ class _RemindersManagementScreenState extends State<_RemindersManagementScreen> 
     _loadReminders();
   }
 
+  // -------- LECTURE DES RAPPELS (firestore/rappels) --------
   Future<void> _loadReminders() async {
     setState(() => _isLoading = true);
 
     try {
-      final now = DateTime.now();
       final snapshot = await FirebaseFirestore.instance
           .collection('users')
           .doc(widget.patientUid)
-          .collection('reminders')
-          .where('done', isEqualTo: false)
-          .where('date', isGreaterThanOrEqualTo: Timestamp.fromDate(now))
-          .orderBy('date')
+          .collection('rappels')        // <-- IMPORTANT
+          .orderBy('timestamp')         // <-- le vrai timestamp
           .get();
 
       final list = snapshot.docs.map((doc) {
         final data = doc.data();
         return {
           'id': doc.id,
-          'title': data['title'] ?? '',
-          'date': data['date'] as Timestamp?,
-          'done': data['done'] ?? false,
+          'title': data['nom'] ?? '',          // <-- nom = titre
+          'date': data['timestamp'],           // <-- timestamp = date
+          'type': data['type'] ?? '',
         };
       }).toList();
 
@@ -1038,6 +1036,7 @@ class _RemindersManagementScreenState extends State<_RemindersManagementScreen> 
     }
   }
 
+  // -------- SUPPRESSION --------
   Future<void> _deleteReminder(String docId) async {
     final confirm = await showDialog<bool>(
       context: context,
@@ -1063,7 +1062,7 @@ class _RemindersManagementScreenState extends State<_RemindersManagementScreen> 
       await FirebaseFirestore.instance
           .collection('users')
           .doc(widget.patientUid)
-          .collection('reminders')
+          .collection('rappels')     // <-- IMPORTANT
           .doc(docId)
           .delete();
 
@@ -1073,6 +1072,7 @@ class _RemindersManagementScreenState extends State<_RemindersManagementScreen> 
     }
   }
 
+  // -------- AJOUT D’UN RAPPEL --------
   void _showAddDialog() {
     final titleController = TextEditingController();
     TimeOfDay selectedTime = TimeOfDay.now();
@@ -1081,184 +1081,165 @@ class _RemindersManagementScreenState extends State<_RemindersManagementScreen> 
     showDialog(
       context: context,
       builder: (dialogContext) {
-        return StatefulBuilder(
-          builder: (context, setDialogState) {
-            return AlertDialog(
-              backgroundColor: const Color(0xFFF0F7FF),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-              title: const Text(
-                'Nouveau rappel',
-                style: TextStyle(
-                  color: Color(0xFF2E5AAC),
-                  fontSize: 22,
-                  fontWeight: FontWeight.bold,
-                ),
+        return StatefulBuilder(builder: (context, setDialogState) {
+          return AlertDialog(
+            backgroundColor: const Color(0xFFF0F7FF),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+            title: const Text(
+              'Nouveau rappel',
+              style: TextStyle(
+                color: Color(0xFF2E5AAC),
+                fontSize: 22,
+                fontWeight: FontWeight.bold,
               ),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  TextField(
-                    controller: titleController,
-                    autofocus: true,
-                    style: const TextStyle(fontSize: 18),
-                    decoration: InputDecoration(
-                      labelText: 'Quoi ?',
-                      labelStyle: const TextStyle(fontSize: 16),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      filled: true,
-                      fillColor: Colors.white,
-                    ),
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: titleController,
+                  autofocus: true,
+                  style: const TextStyle(fontSize: 18),
+                  decoration: InputDecoration(
+                    labelText: 'Quoi ?',
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                    filled: true,
+                    fillColor: Colors.white,
                   ),
-                  const SizedBox(height: 24),
-
-                  Row(
-                    children: [
-                      Expanded(
-                        child: GestureDetector(
-                          onTap: () async {
-                            final date = await showDatePicker(
-                              context: context,
-                              initialDate: selectedDate,
-                              firstDate: DateTime.now(),
-                              lastDate: DateTime.now().add(const Duration(days: 365)),
-                            );
-                            if (date != null) {
-                              setDialogState(() => selectedDate = date);
-                            }
-                          },
-                          child: Container(
-                            padding: const EdgeInsets.all(16),
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(color: const Color(0xFF4A90E2), width: 2),
-                            ),
-                            child: Column(
-                              children: [
-                                const Icon(Icons.calendar_today, color: Color(0xFF4A90E2), size: 28),
-                                const SizedBox(height: 8),
-                                Text(
-                                  "${selectedDate.day}/${selectedDate.month}",
-                                  style: const TextStyle(
-                                    fontSize: 18,
-                                    fontWeight: FontWeight.bold,
-                                    color: Color(0xFF2E5AAC),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-
-                      Expanded(
-                        child: GestureDetector(
-                          onTap: () async {
-                            final time = await showTimePicker(
-                              context: context,
-                              initialTime: selectedTime,
-                            );
-                            if (time != null) {
-                              setDialogState(() => selectedTime = time);
-                            }
-                          },
-                          child: Container(
-                            padding: const EdgeInsets.all(16),
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(color: const Color(0xFF4A90E2), width: 2),
-                            ),
-                            child: Column(
-                              children: [
-                                const Icon(Icons.access_time, color: Color(0xFF4A90E2), size: 28),
-                                const SizedBox(height: 8),
-                                Text(
-                                  selectedTime.format(context),
-                                  style: const TextStyle(
-                                    fontSize: 18,
-                                    fontWeight: FontWeight.bold,
-                                    color: Color(0xFF2E5AAC),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(dialogContext),
-                  child: const Text("Annuler", style: TextStyle(fontSize: 16)),
                 ),
-                ElevatedButton(
-                  onPressed: () async {
-                    final title = titleController.text.trim();
-                    if (title.isEmpty) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text("Entrez un titre")),
-                      );
-                      return;
-                    }
-
-                    final reminderDateTime = DateTime(
-                      selectedDate.year,
-                      selectedDate.month,
-                      selectedDate.day,
-                      selectedTime.hour,
-                      selectedTime.minute,
-                    );
-
-                    await FirebaseFirestore.instance
-                        .collection('users')
-                        .doc(widget.patientUid)
-                        .collection('reminders')
-                        .add({
-                      'title': title,
-                      'date': Timestamp.fromDate(reminderDateTime),
-                      'done': false,
-                      'createdAt': FieldValue.serverTimestamp(),
-                    });
-
-                    Navigator.pop(dialogContext);
-                    _loadReminders();
-
-                    if (mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text("Rappel ajouté"),
-                          backgroundColor: Colors.green,
-                        ),
-                      );
-                    }
-                  },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF4A90E2),
-                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
+                const SizedBox(height: 24),
+                Row(
+                  children: [
+                    Expanded(
+                      child: GestureDetector(
+                        onTap: () async {
+                          final date = await showDatePicker(
+                            context: context,
+                            initialDate: selectedDate,
+                            firstDate: DateTime.now(),
+                            lastDate: DateTime.now().add(const Duration(days: 365)),
+                          );
+                          if (date != null) setDialogState(() => selectedDate = date);
+                        },
+                        child: _buildDateBox(selectedDate),
+                      ),
                     ),
-                  ),
-                  child: const Text(
-                    "Ajouter",
-                    style: TextStyle(fontSize: 16, color: Colors.white),
-                  ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: GestureDetector(
+                        onTap: () async {
+                          final time = await showTimePicker(
+                            context: context,
+                            initialTime: selectedTime,
+                          );
+                          if (time != null) setDialogState(() => selectedTime = time);
+                        },
+                        child: _buildTimeBox(selectedTime),
+                      ),
+                    ),
+                  ],
                 ),
               ],
-            );
-          },
-        );
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text("Annuler", style: TextStyle(fontSize: 16)),
+              ),
+              ElevatedButton(
+                onPressed: () async {
+                  final title = titleController.text.trim();
+                  if (title.isEmpty) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text("Entrez un titre")),
+                    );
+                    return;
+                  }
+
+                  final reminderDateTime = DateTime(
+                    selectedDate.year,
+                    selectedDate.month,
+                    selectedDate.day,
+                    selectedTime.hour,
+                    selectedTime.minute,
+                  );
+
+                  await FirebaseFirestore.instance
+                      .collection('users')
+                      .doc(widget.patientUid)
+                      .collection('rappels')    // <-- IMPORTANT
+                      .add({
+                    'nom': title,
+                    'type': 'general',                    // optionnel
+                    'timestamp': Timestamp.fromDate(reminderDateTime),
+                  });
+
+                  Navigator.pop(dialogContext);
+                  _loadReminders();
+
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text("Rappel ajouté"),
+                        backgroundColor: Colors.green,
+                      ),
+                    );
+                  }
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF4A90E2),
+                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+                child: const Text("Ajouter", style: TextStyle(fontSize: 16, color: Colors.white)),
+              ),
+            ],
+          );
+        });
       },
     );
   }
 
+  // --- Helpers d'affichage ---
+  Widget _buildDateBox(DateTime d) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFF4A90E2), width: 2),
+      ),
+      child: Column(
+        children: [
+          const Icon(Icons.calendar_today, color: Color(0xFF4A90E2), size: 28),
+          const SizedBox(height: 8),
+          Text("${d.day}/${d.month}",
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF2E5AAC))),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTimeBox(TimeOfDay t) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFF4A90E2), width: 2),
+      ),
+      child: Column(
+        children: [
+          const Icon(Icons.access_time, color: Color(0xFF4A90E2), size: 28),
+          const SizedBox(height: 8),
+          Text(t.format(context),
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF2E5AAC))),
+        ],
+      ),
+    );
+  }
+
+  // -------- FORMATAGE --------
   String _formatTime(Timestamp? ts) {
     if (ts == null) return '--:--';
     final d = ts.toDate();
@@ -1266,7 +1247,7 @@ class _RemindersManagementScreenState extends State<_RemindersManagementScreen> 
   }
 
   String _formatDate(Timestamp? ts) {
-    if (ts == null) return '';
+    if (ts == null) return '--/--/----';
     final d = ts.toDate();
     return "${d.day}/${d.month}/${d.year}";
   }
@@ -1290,9 +1271,7 @@ class _RemindersManagementScreenState extends State<_RemindersManagementScreen> 
       ),
       floatingActionButton: Container(
         decoration: BoxDecoration(
-          gradient: const LinearGradient(
-            colors: [Color(0xFF6EC6FF), Color(0xFF4A90E2)],
-          ),
+          gradient: const LinearGradient(colors: [Color(0xFF6EC6FF), Color(0xFF4A90E2)]),
           borderRadius: BorderRadius.circular(30),
         ),
         child: FloatingActionButton.extended(
@@ -1300,45 +1279,29 @@ class _RemindersManagementScreenState extends State<_RemindersManagementScreen> 
           backgroundColor: Colors.transparent,
           elevation: 0,
           icon: const Icon(Icons.add, color: Colors.white, size: 28),
-          label: const Text(
-            "Ajouter",
-            style: TextStyle(
-              color: Colors.white,
-              fontWeight: FontWeight.bold,
-              fontSize: 18,
-            ),
-          ),
+          label: const Text("Ajouter",
+              style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18)),
         ),
       ),
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [Color(0xFFEAF2FF), Color(0xFFF6FBFF)],
-          ),
-        ),
-        child: _isLoading
-            ? const Center(child: CircularProgressIndicator(color: Color(0xFF4A90E2)))
-            : _reminders.isEmpty
-            ? _buildEmptyState()
-            : RefreshIndicator(
-          onRefresh: _loadReminders,
-          child: ListView(
-            padding: const EdgeInsets.all(20),
-            children: _reminders.map((r) => _buildReminderCard(r)).toList(),
-          ),
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator(color: Color(0xFF4A90E2)))
+          : _reminders.isEmpty
+          ? _buildEmptyState()
+          : RefreshIndicator(
+        onRefresh: _loadReminders,
+        child: ListView(
+          padding: const EdgeInsets.all(20),
+          children: _reminders.map((r) => _buildReminderCard(r)).toList(),
         ),
       ),
     );
   }
 
+  // -------- AFFICHAGE D’UNE CARTE --------
   Widget _buildReminderCard(Map<String, dynamic> reminder) {
     final title = reminder['title'] as String;
     final ts = reminder['date'] as Timestamp?;
     final docId = reminder['id'] as String;
-    final timeText = _formatTime(ts);
-    final dateText = _formatDate(ts);
 
     return Card(
       elevation: 2,
@@ -1352,9 +1315,7 @@ class _RemindersManagementScreenState extends State<_RemindersManagementScreen> 
               width: 56,
               height: 56,
               decoration: BoxDecoration(
-                gradient: const LinearGradient(
-                  colors: [Color(0xFF6EC6FF), Color(0xFF4A90E2)],
-                ),
+                gradient: const LinearGradient(colors: [Color(0xFF6EC6FF), Color(0xFF4A90E2)]),
                 borderRadius: BorderRadius.circular(14),
               ),
               child: const Icon(Icons.notifications, color: Colors.white, size: 28),
@@ -1362,46 +1323,28 @@ class _RemindersManagementScreenState extends State<_RemindersManagementScreen> 
             const SizedBox(width: 16),
 
             Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(title,
                     style: const TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.w600,
-                      color: Color(0xFF1F2937),
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      Icon(Icons.calendar_today, size: 16, color: Colors.grey[600]),
-                      const SizedBox(width: 6),
-                      Text(
-                        dateText,
-                        style: TextStyle(fontSize: 16, color: Colors.grey[700]),
-                      ),
-                      const SizedBox(width: 12),
-                      Icon(Icons.access_time, size: 16, color: Colors.grey[600]),
-                      const SizedBox(width: 6),
-                      Text(
-                        timeText,
-                        style: TextStyle(fontSize: 16, color: Colors.grey[700]),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
+                        fontSize: 20, fontWeight: FontWeight.w600, color: Color(0xFF1F2937))),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Icon(Icons.calendar_today, size: 16, color: Colors.grey[600]),
+                    const SizedBox(width: 6),
+                    Text(_formatDate(ts), style: TextStyle(fontSize: 16, color: Colors.grey[700])),
+                    const SizedBox(width: 12),
+                    Icon(Icons.access_time, size: 16, color: Colors.grey[600]),
+                    const SizedBox(width: 6),
+                    Text(_formatTime(ts), style: TextStyle(fontSize: 16, color: Colors.grey[700])),
+                  ],
+                ),
+              ]),
             ),
 
             InkWell(
               onTap: () => _deleteReminder(docId),
-              child: const Icon(
-                Icons.delete_outline,
-                color: Colors.redAccent,
-                size: 30,
-              ),
+              child: const Icon(Icons.delete_outline, color: Colors.redAccent, size: 30),
             ),
           ],
         ),
@@ -1418,21 +1361,11 @@ class _RemindersManagementScreenState extends State<_RemindersManagementScreen> 
           const SizedBox(height: 30),
           const Text(
             "Aucun rappel",
-            style: TextStyle(
-              fontSize: 26,
-              fontWeight: FontWeight.bold,
-              color: Color(0xFF2E5AAC),
-            ),
+            style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold, color: Color(0xFF2E5AAC)),
           ),
           const SizedBox(height: 16),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 40),
-            child: Text(
-              "Appuyez sur + pour ajouter",
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 18, color: Colors.grey[700]),
-            ),
-          ),
+          Text("Appuyez sur + pour ajouter",
+              style: TextStyle(fontSize: 18, color: Colors.grey[700])),
         ],
       ),
     );
